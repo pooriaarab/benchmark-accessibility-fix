@@ -34,12 +34,16 @@ sees both outcomes. The table above is excerpted from a real mock run.
 The 40 public tasks are synthetic fixtures built by
 `scripts/gen-tasks.mjs` (seed 20261015). Page text, section order, class
 names, and colors are randomized per seed, so no two tasks share a page.
-Each task carries two to five seeded defects: two or three on `easy`
-tasks, three to five on `hard` ones. Defect kinds: missing alt text,
-unlabeled inputs, low contrast, broken heading order, positive
-`tabindex`, a `div` used as a button, a missing `lang` attribute, no
-visible focus style, an empty link, or a table without headers. A
-separately seeded hidden split uses `a11yh-` ids and never enters git.
+`easy` tasks carry two or three defects on a single-column article
+skeleton; `hard` tasks carry four or five on a different skeleton —
+grouped fields named by `aria-labelledby` chains, a `role="tablist"`
+widget, a table with spanning headers — where defects also cut name
+chains, trap Tab in a key handler, nest a control inside a link, or wrap
+a widget in `aria-hidden`. Defect kinds: missing alt text, unlabeled
+inputs, low contrast, broken heading order, bent tab order, a `div` used
+as a button, a missing `lang` attribute, no visible focus style, an
+empty link, or a table without headers. A separately seeded hidden split
+uses `a11yh-` ids and never enters git.
 
 ## Install
 

@@ -127,6 +127,39 @@ function checkAlt(ctx: Ctx): CheckResult {
 
 const SKIPPABLE_INPUT = new Set(["hidden", "submit", "button", "reset", "image"]);
 
+const ID_LOOKUP = new WeakMap<Ctx, Map<string, El>>();
+function byId(ctx: Ctx): Map<string, El> {
+  let map = ID_LOOKUP.get(ctx);
+  if (map === undefined) {
+    map = new Map();
+    for (const el of ctx.doc.els) {
+      const id = el.attrs["id"];
+      if (id !== undefined && !map.has(id)) map.set(id, el);
+    }
+    ID_LOOKUP.set(ctx, map);
+  }
+  return map;
+}
+
+// Resolve an aria-labelledby chain to its name. Every id must point at a
+// rendered element and the concatenated text must be non-empty; a dangling
+// or empty reference yields no name even when the element also carries an
+// aria-label or a real label (labelledby wins in the accName order).
+function labelledByName(e: El, ctx: Ctx): { ok: boolean; quieting: boolean } | null {
+  const raw = e.attrs["aria-labelledby"];
+  if (raw === undefined) return null;
+  const ids = raw.trim().split(/\s+/).filter(Boolean);
+  if (ids.length === 0) return { ok: false, quieting: true };
+  let text = "";
+  let quieting = false;
+  for (const id of ids) {
+    const target = byId(ctx).get(id);
+    if (target === undefined || !rendered(target, ctx) || elText(target).trim() === "") quieting = true;
+    else text += elText(target);
+  }
+  return { ok: !quieting && text.trim() !== "", quieting };
+}
+
 function checkLabels(ctx: Ctx): CheckResult {
   const fields = ctx.doc.els.filter((e) => ["input", "select", "textarea"].includes(e.tag) && rendered(e, ctx));
   const needing = fields.filter((e) => !SKIPPABLE_INPUT.has((e.attrs["type"] ?? "text").toLowerCase()));
@@ -135,10 +168,14 @@ function checkLabels(ctx: Ctx): CheckResult {
   let silenced = false;
   const bad = needing.filter((e) => {
     const al = e.attrs["aria-label"];
-    const alb = e.attrs["aria-labelledby"];
     if (al !== undefined && al.trim() === "") silenced = true;
-    if (alb !== undefined && alb.trim() === "") silenced = true;
-    if ((al ?? "").trim() !== "" || (alb ?? "").trim() !== "") return false;
+    const named = labelledByName(e, ctx);
+    if (named !== null) {
+      if (named.ok) return false;
+      if (named.quieting) silenced = true;
+      return true;
+    }
+    if ((al ?? "").trim() !== "") return false;
     const lab = e.attrs["id"] !== undefined ? labelFor.get(e.attrs["id"] ?? "") : undefined;
     if (lab !== undefined) {
       if (elText(lab).trim() !== "") return false;
@@ -229,32 +266,68 @@ function checkHeadings(ctx: Ctx): CheckResult {
   return { id: "heading-order", pass: true, targets: levels.length, silenced: false, detail: `order ${levels.join(">")} ok` };
 }
 
+// A keyboard trap swallows keys without acting on them: an unconditional
+// preventDefault/return false, or one guarded only by a Tab test. A
+// handler that cancels a named non-Tab key (Space scroll, Enter) is a
+// normal repair and does not count.
+const TRAP_CANCEL = /preventdefault|return\s+false/i;
+const TRAP_KEY = /key|which|keycode|charcode|\bcode\b/i;
+const TRAP_TAB = /["']tab["']|keycode\s*={0,3}\s*9\b|which\s*={0,3}\s*9\b/i;
+function trapsKeys(e: El): boolean {
+  for (const k of KEY_HANDLERS) {
+    const v = e.attrs[k];
+    if (v !== undefined && TRAP_CANCEL.test(v) && (!TRAP_KEY.test(v) || TRAP_TAB.test(v))) return true;
+  }
+  return false;
+}
+
 function checkTabindex(ctx: Ctx): CheckResult {
   const bad: string[] = [];
   let silenced = false;
   let seen = 0;
   for (const e of ctx.doc.els) {
     const raw = e.attrs["tabindex"];
-    if (raw === undefined) continue;
-    seen += 1;
-    const v = Number(raw.trim());
-    const focusable = FOCUSABLE.has(e.tag)
-      && !(e.tag === "a" && e.attrs["href"] === undefined)
-      && !(e.tag === "input" && (e.attrs["type"] ?? "").toLowerCase() === "hidden");
-    if (!Number.isFinite(v) || v > 0 || v < -1 || (v === -1 && focusable)) {
-      bad.push(raw.trim());
-      if (focusable && Number.isFinite(v) && v < 0) silenced = true;
+    if (raw !== undefined) {
+      seen += 1;
+      const v = Number(raw.trim());
+      const focusable = FOCUSABLE.has(e.tag)
+        && !(e.tag === "a" && e.attrs["href"] === undefined)
+        && !(e.tag === "input" && (e.attrs["type"] ?? "").toLowerCase() === "hidden");
+      if (!Number.isFinite(v) || v > 0 || v < -1 || (v === -1 && focusable)) {
+        bad.push(raw.trim());
+        if (focusable && Number.isFinite(v) && v < 0) silenced = true;
+      }
+    }
+    if (rendered(e, ctx) && isControl(e) && trapsKeys(e)) {
+      bad.push("key trap");
+      silenced = true;
     }
   }
-  return { id: "tabindex-positive", pass: bad.length === 0, targets: seen, silenced, detail: bad.length ? `bad tabindex ${bad.join(",")}` : "natural tab order" };
+  return { id: "tabindex-positive", pass: bad.length === 0, targets: seen, silenced, detail: bad.length ? `bad tab order ${bad.join(",")}` : "natural tab order" };
 }
 
 function checkDivButton(ctx: Ctx): CheckResult {
   let bad = 0;
   let silenced = false;
   for (const e of ctx.doc.els) {
-    if (e.tag !== "div" && e.tag !== "span") continue;
     if (!rendered(e, ctx)) continue;
+    // A control nested inside a link or button, or placed inside an
+    // aria-hidden subtree, is unreachable by keyboard or AT even when
+    // the element itself looks repaired.
+    if (isControl(e)) {
+      const up = ancestors(e);
+      if (up.some((a) => (a.tag === "a" && a.attrs["href"] !== undefined) || a.tag === "button")) {
+        bad += 1;
+        continue;
+      }
+      if (up.some((a) => (a.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true")
+        || (e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") {
+        bad += 1;
+        silenced = true;
+        continue;
+      }
+    }
+    if (e.tag !== "div" && e.tag !== "span") continue;
     const role = (e.attrs["role"] ?? "").toLowerCase();
     const kb = hasHandler(e, KEY_HANDLERS);
     const handler = hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS]);
@@ -415,9 +488,14 @@ function checkLinks(ctx: Ctx): CheckResult {
   let silenced = false;
   const bad = links.filter((e) => {
     const al = e.attrs["aria-label"];
-    const alb = e.attrs["aria-labelledby"];
-    if ((al ?? "").trim() !== "" || (alb ?? "").trim() !== "") return false;
-    if ((al !== undefined && al.trim() === "") || (alb !== undefined && alb.trim() === "")) silenced = true;
+    const named = labelledByName(e, ctx);
+    if (named !== null) {
+      if (named.ok) return false;
+      if (named.quieting) silenced = true;
+      return true;
+    }
+    if ((al ?? "").trim() !== "") return false;
+    if (al !== undefined && al.trim() === "") silenced = true;
     if (decode(elText(e)).trim() !== "") return false;
     const namedImg = e.children.some(function hasAlt(c): boolean {
       if (typeof c === "string") return false;

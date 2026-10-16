@@ -252,6 +252,138 @@ ${sections[3]}
   };
 }
 
+const TABS = ["Overview", "History", "Members", "Billing", "Usage", "Alerts", "Archive", "Notes"];
+
+// Hard tier: a different page skeleton, not the easy page with extra
+// defects. Grouped fields carry names through an aria-labelledby chain,
+// a tab widget holds role/tabindex/handler parts, and the table spans
+// headers across columns and rows - so a fixer tuned to the easy template
+// leaves real barriers behind.
+function buildHard(rng) {
+  const title = `${pick(rng, ADJ)} ${pick(rng, NOUN)} ${pick(rng, KIND)}`;
+  const topics = pick(rng, TOPICS);
+  const [h2a, h2b, h3c] = topics;
+  const caption = pick(rng, CAPTIONS);
+  const noteClass = pick(rng, CLASS_A);
+  const ctaClass = pick(rng, CLASS_B);
+  const noteText = pick(rng, NOTES);
+  const spanText = pick(rng, SPANS);
+  const heroAlt = pick(rng, ALTS);
+  const img = `https://example.com/${title.toLowerCase().replace(/[^a-z]+/g, "-")}.jpg`;
+  const ctaText = pick(rng, CTA);
+  const nav2 = pick(rng, NAV2);
+  const cardText = pick(rng, CTA.filter((c) => c !== ctaText));
+  const tabs = pickN(rng, TABS, 2);
+  const [f0, f1, f2] = pickN(rng, FIELD_POOL, 3);
+  const colheads = pick(rng, COLHEADS);
+  const cells = pickN(rng, CELLS, 4);
+  const body = goodPair(rng);
+  const note = goodPair(rng);
+  const spanFg = goodPair(rng, 4.5).fg;
+  const cta = goodPair(rng);
+  const tabPair = goodPair(rng);
+  const focusColor = goodPair(rng).fg;
+  const large = rng() < 0.5 ? largePair(rng) : null;
+  const largeRule = large ? `\n.big-head{color:${large.fg};background-color:${large.bg};font-size:26px;font-weight:700}` : "";
+  const bigHead = large ? `<h2 class="big-head" id="deck">${h2a}</h2>` : `<h2 id="deck">${h2a}</h2>`;
+  const styleBlock = `<style>
+body{color:${body.fg};background-color:${body.bg};font-family:system-ui,sans-serif;line-height:1.5}
+.${noteClass}{color:${note.fg};background-color:${note.bg}}
+.tab{color:${tabPair.fg};background-color:${tabPair.bg};padding:.4rem .8rem;display:inline-block}
+.${ctaClass}{color:${cta.fg};background-color:${cta.bg};padding:.6rem 1rem;border:0;border-radius:.4rem}
+a:focus-visible,.${ctaClass}:focus-visible,[role=tab]:focus-visible{outline:3px solid ${focusColor};outline-offset:2px}${largeRule}
+</style>`;
+
+  const skip = `<a href="#main">Skip to content</a>`;
+  const labelParts = f0[1].split(" ");
+  const labSpanA = `<span id="l-a">${labelParts[0]}</span>`;
+  const labSpanB = `<span id="l-b">${labelParts.slice(1).join(" ") || pick(rng, topics)}</span>`;
+  const tabA = `<div role="tab" tabindex="0" onkeydown="pickTab('a')" aria-selected="true">${tabs[0]}</div>`;
+  const tabB = `<div role="tab" tabindex="0" onkeydown="pickTab('b')" aria-selected="false">${tabs[1]}</div>`;
+  const tabsOpen = `<div class="tabs" role="tablist" aria-labelledby="tabs-title">`;
+  const label = `<label for="hf2">${f1[1]}</label>`;
+  const cardLink = `<a href="/${cardText.toLowerCase()}">${cardText}</a>`;
+  const table = `<table>
+<caption>${caption}</caption>
+<tr><th scope="col">${colheads[0]}</th><th colspan="2" scope="colgroup">${colheads[1]}</th></tr>
+<tr><th scope="row">${cells[0][0]}</th><td>${cells[0][1]}</td><td>${cells[0][2]}</td></tr>
+<tr><th scope="row">${cells[1][0]}</th><td>${cells[1][1]}</td><td>${cells[1][2]}</td></tr>
+<tr><th scope="row">${cells[2][0]}</th><td>${cells[2][1]}</td><td>${cells[2][2]}</td></tr>
+</table>`;
+  const sections = shuffle(rng, [
+    `<img src="${img}" alt="${heroAlt}">`,
+    `<p class="${noteClass}">${noteText}</p>`,
+    `<p><span style="color:${spanFg}">${spanText}</span></p>`,
+    table,
+  ]);
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+${styleBlock}
+</head>
+<body>
+<header>
+<nav>${skip} <a href="/${nav2.toLowerCase()}">${nav2}</a></nav>
+<h1>${title}</h1>
+</header>
+<main id="main">
+${bigHead}
+<section aria-labelledby="deck">
+${sections[0]}
+${sections[1]}
+</section>
+<h3 id="tabs-title">${h2b}</h3>
+${tabsOpen}
+${tabA}
+${tabB}
+</div>
+<h4>${h3c}</h4>
+<fieldset>
+<legend>${h3c}</legend>
+${labSpanA} ${labSpanB}
+<input id="hf1" name="hf1" type="${f0[2]}" autocomplete="off" aria-labelledby="l-a l-b">
+${label}
+<input id="hf2" name="hf2" type="${f1[2]}" autocomplete="${f1[0]}">
+<input id="hf3" name="hf3" type="${f2[2]}" autocomplete="${f2[0]}" aria-label="${f2[1]}">
+</fieldset>
+${sections[2]}
+<p>${cardLink} <button class="${ctaClass}" type="button">${ctaText}</button></p>
+${sections[3]}
+</main>
+<footer>
+<p><a href="/archive">Archive</a> <a href="/contact">Contact</a></p>
+</footer>
+</body>
+</html>`;
+  return {
+    html,
+    hooks: {
+      heroAlt: ` alt="${heroAlt}"`,
+      label: `${label}\n`,
+      labSpanA,
+      labSpanB,
+      labelledby: `aria-labelledby="l-a l-b"`,
+      noteRule: `.${noteClass}{color:${note.fg};`,
+      noteBad: `.${noteClass}{color:${badFg(rng, note.bg)};`,
+      spanRule: `<span style="color:${spanFg}">`,
+      spanBad: `<span style="color:${badFg(rng, body.bg)}">`,
+      tabA,
+      tabsOpen,
+      ctaButton: `<button class="${ctaClass}" type="button">${ctaText}</button>`,
+      ctaText,
+      focusRule: `\na:focus-visible,.${ctaClass}:focus-visible,[role=tab]:focus-visible{outline:3px solid ${focusColor};outline-offset:2px}`,
+      skip,
+      archive: `<a href="/archive">Archive</a>`,
+      cardLink,
+      cardHref: `/${cardText.toLowerCase()}`,
+      cardText,
+      heading3: `<h3 id="tabs-title">${h2b}</h3>`,
+    },
+  };
+}
+
 // Each breaker rewrites one hook in the fixed page. Variants make the same
 // defect appear in different disguises (role-button lookalikes, multi-step
 // tab order, empty-label silences) so a template-aware regex fixer misses.
@@ -294,10 +426,58 @@ const BREAKERS = {
   "table-headers": () => [(p) => p.replaceAll("<th scope=\"col\">", "<td>").replaceAll("</th>", "</td>"), "headers demoted"],
 };
 
+// Hard-tier breakers hit the widget skeleton: dangling name chains, a Tab
+// trap, a control nested in a link, a widget hidden from AT, and spanning
+// headers demoted. Each leaves the page looking close to fixed, so a
+// template-aware repair still fails the check.
+const HARD_BREAKERS = {
+  "missing-alt": (h) => [(p) => p.replace(h.hooks.heroAlt, ""), "alt removed"],
+  "unlabeled-input": (h, rng) => {
+    const v = rng();
+    if (v < 0.35) return [(p) => p.replace(h.hooks.labSpanB, h.hooks.labSpanB.replace('id="l-b"', 'id="l-gone"')), "labelledby link cut"];
+    if (v < 0.6) return [(p) => p.replace(h.hooks.labSpanA, h.hooks.labSpanA.replace(/>([^<]+)</, "><")).replace(h.hooks.labSpanB, h.hooks.labSpanB.replace(/>([^<]+)</, "><")), "labelledby emptied"];
+    if (v < 0.8) return [(p) => p.replace(h.hooks.labelledby, 'aria-labelledby="l-a l-missing"'), "labelledby dangled"];
+    return [(p) => p.replace(h.hooks.label, ""), "label removed"];
+  },
+  "low-contrast": (h) => [(p) => p.replace(h.hooks.noteRule, h.hooks.noteBad).replace(h.hooks.spanRule, h.hooks.spanBad), "colors dimmed"],
+  "heading-order": (h, rng) => [(p) => (rng() < 0.5
+    ? p.replace("<h3", "<h5").replace("</h3>", "</h5>")
+    : p.replace("<h1>", "<h2>").replace("</h1>", "</h2>")), "headings shuffled"],
+  "tabindex-positive": (h, rng) => [(p) => {
+    // Two disguises: a focus trap on the first tab (Tab swallowed), and
+    // a bent multi-step order across nav and footer.
+    let out = p;
+    if (rng() < 0.6) out = out.replace('onkeydown="pickTab(\'a\')"', "onkeydown=\"if(event.key==='Tab')event.preventDefault()\"");
+    out = out.replace('<a href="#main">', '<a tabindex="2" href="#main">');
+    if (rng() < 0.5) out = out.replace('<a href="/archive">', '<a tabindex="1" href="/archive">');
+    return out;
+  }, "tab order bent"],
+  "div-button": (h, rng) => {
+    const v = rng();
+    if (v < 0.4) return [(p) => p.replace(`<p>${h.hooks.cardLink} ${h.hooks.ctaButton}</p>`, `<p><a href="${h.cardHref}">${h.cardText}<div class="cta-div" onclick="go()">${h.hooks.ctaText}</div></a></p>`), "control nested in link"];
+    if (v < 0.7) return [(p) => p.replace(h.hooks.tabA, h.hooks.tabA.replace(' tabindex="0" onkeydown="pickTab(\'a\')"', "")), "tab lost keyboard support"];
+    return [(p) => p.replace(h.hooks.tabsOpen, h.hooks.tabsOpen.replace(/>$/, ' aria-hidden="true">')), "widget hidden from AT"];
+  },
+  "missing-lang": () => [(p) => p.replace('<html lang="en">', "<html>"), "lang removed"],
+  "no-focus-style": (h) => [(p) => p.replace(h.hooks.focusRule, ""), "focus rule removed"],
+  "empty-link": (h, rng) => {
+    const v = rng();
+    // The div-button breaker can consume the card link first; the footer
+    // archive link is always there as a fallback target.
+    return [(p) => {
+      const target = p.includes(h.hooks.cardLink) ? h.hooks.cardLink : h.hooks.archive;
+      if (v < 0.4 && target === h.hooks.cardLink) return p.replace(target, target.replace(">", ' aria-labelledby="ghost">'));
+      if (v < 0.7) return p.replace(target, target.replace(/>([^<]+)</, "><"));
+      return p.replace(target, target.replace(/>([^<]+)</, '><span class="icon"></span><'));
+    }, "link name removed"];
+  },
+  "table-headers": () => [(p) => p.replaceAll("<th ", "<td ").replaceAll("</th>", "</td>"), "headers demoted"],
+};
+
 function pickDefects(rng, taskIndex, tier) {
   const ids = CHECKS.map(([id]) => id);
   const defects = new Set([ids[taskIndex % ids.length]]);
-  const target = tier === "hard" ? 3 + Math.floor(rng() * 3) : 2 + Math.floor(rng() * 2);
+  const target = tier === "hard" ? 4 + Math.floor(rng() * 2) : 2 + Math.floor(rng() * 2);
   while (defects.size < target) defects.add(ids[Math.floor(rng() * ids.length)]);
   return [...defects];
 }
@@ -313,11 +493,12 @@ const tasks = [];
 const fingerprints = new Set();
 for (let i = 0; i < count; i++) {
   const tier = i % 3 === 2 ? "hard" : "easy";
-  const built = buildFixed(rng);
+  const built = tier === "hard" ? buildHard(rng) : buildFixed(rng);
+  const breakers = tier === "hard" ? HARD_BREAKERS : BREAKERS;
   const defects = pickDefects(rng, i, tier).sort();
   let broken = built.html;
   for (const id of defects) {
-    const [breakPage] = BREAKERS[id](built, rng);
+    const [breakPage] = breakers[id](built, rng);
     const next = breakPage(broken);
     if (next === broken) throw new Error(`breaker ${id} changed nothing on task ${i + 1}`);
     broken = next;
