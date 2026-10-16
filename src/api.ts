@@ -10,6 +10,9 @@ const forbidden = (message: string) =>
 // package or inside a directory named by the A11Y_TASK_DIRS allow-list.
 export function makeHandler(bench: Benchmark<Task> = benchmark): (request: Request) => Promise<Response> {
   const base = createHandler(bench);
+  // A resolved tasks path maps to one handler, so repeat calls do not
+  // re-read and re-parse the JSONL on every request.
+  const byPath = new Map<string, (request: Request) => Promise<Response>>();
   return async (request: Request): Promise<Response> => {
     const url = new URL(request.url);
     let requested = url.searchParams.get("tasks");
@@ -37,7 +40,12 @@ export function makeHandler(bench: Benchmark<Task> = benchmark): (request: Reque
     if (resolved === null) {
       return forbidden("tasks path must point inside the package or an A11Y_TASK_DIRS directory and be readable.");
     }
-    return createHandler(makeBenchmark(resolved))(forward);
+    let sub = byPath.get(resolved);
+    if (sub === undefined) {
+      sub = createHandler(makeBenchmark(resolved));
+      byPath.set(resolved, sub);
+    }
+    return sub(forward);
   };
 }
 

@@ -192,7 +192,7 @@ for (const [i, h] of hidden.entries()) {
 // every path needs a fresh object. Run default, hidden, default, hidden
 // in ONE process and check the ids each time.
 const hiddenPath = resolve("artifacts/tasks.hidden.jsonl");
-const { makeBenchmark, run: runSdk } = await import("../dist/index.js");
+const { makeBenchmark, run: runSdk, score: scoreSdk } = await import("../dist/index.js");
 const { mockAdapter } = await import("benchmark-core");
 const seq = [];
 for (const path of [undefined, hiddenPath, undefined, hiddenPath]) {
@@ -206,6 +206,11 @@ assert.ok(seq[3].every((r) => r.taskId.startsWith("a11yh-")), "second hidden run
 const listedHidden = await makeBenchmark(hiddenPath).listTasks();
 assert.equal(listedHidden.length, hidden.length);
 assert.equal((await benchmark.listTasks()).length, taskCount, "default benchmark cache was clobbered");
+// The SDK score() surface takes the same tasksPath and grades against
+// the alternate list; without it a hidden id is simply unknown.
+const sdkHit = await scoreSdk(hidden[0].id, { answer: hidden[0].expected }, { tasksPath: hiddenPath });
+assert.equal(sdkHit.score, 1, `SDK score(tasksPath) scored ${sdkHit.score} on the hidden reference fix`);
+await assert.rejects(scoreSdk(hidden[0].id, { answer: hidden[0].expected }), /Task not found/, "SDK score without tasksPath graded a hidden id");
 // CLI --tasks swaps the list for any command.
 const cliList = await execFile(process.execPath, ["dist/cli.js", "list", "--tasks", hiddenPath, "--json"], { maxBuffer: 10_000_000 });
 assert.ok(JSON.parse(cliList.stdout).tasks.every((t) => t.id.startsWith("a11yh-")), "CLI --tasks list returned public ids");
@@ -274,6 +279,16 @@ try {
   const listed = JSON.parse(result.content[0].text).tasks;
   assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP A11Y_TASKS returned public ids");
 } finally { await hiddenClient.close(); }
+
+// The documented --tasks flag reaches the same MCP surface.
+const flagTransport = new StdioClientTransport({ command: process.execPath, args: ["dist/cli.js", "mcp", "--tasks", hiddenPath], cwd: process.cwd(), stderr: "pipe" });
+const flagClient = new Client({ name: "benchmark-accessibility-fix-e2e-tasks-flag", version: "0.1.0" });
+await flagClient.connect(flagTransport);
+try {
+  const result = await flagClient.callTool({ name: "list_tasks", arguments: {} });
+  const listed = JSON.parse(result.content[0].text).tasks;
+  assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP --tasks returned public ids");
+} finally { await flagClient.close(); }
 
 const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked } };
 await mkdir("artifacts", { recursive: true });
