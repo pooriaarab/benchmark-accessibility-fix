@@ -18,6 +18,10 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
+      # claude.ai/install.sh now 403s GitHub-hosted runners; the action skips
+      # its own install when claude is already on PATH.
+      - name: Install Claude Code CLI for the chair
+        run: npm install -g @anthropic-ai/claude-code
       - uses: pooriaarab/vibecodereview@v1
         with:
           vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}
