@@ -199,6 +199,40 @@ for (const [name, applies, fn] of TRICKS) {
     assert.ok(r.score < 0.3, `${task.id} trick "${name}" scored ${r.score}: ${r.reason}`);
   }
 }
+// Deleted styles still count when a `<style>` tag survives only inside an
+// HTML comment or `style=` only in prose - the test reads parsed markup.
+{
+  const t = tasks[0];
+  const gutted = t.expected
+    .replace(/<style>[\s\S]*?<\/style>/g, "<!-- <style></style> -->")
+    .replace(/ style="[^"]*"/g, "")
+    .replace("</main>", "<p>See the style= attribute docs.</p>\n</main>");
+  const r = await benchmark.score(t, { answer: gutted });
+  assert.equal(r.score, 0, `commented style remnants scored ${r.score}: ${r.reason}`);
+  assert.equal(r.details.stylesDeleted, true, "stylesDeleted not flagged with comment remnants");
+}
+// ---- Visible-information policy ----
+// Concealment that does not remove the element from the parsed render -
+// clip-path, transform, zero height, tiny font, off-screen position - is
+// neither a fix nor a penalty: it cannot rescue a broken page and it does
+// not hurt a correct one. Documented in docs/grading.md; the classic
+// sr-only pattern relies on the same machinery.
+const OFFSCREEN = [
+  'p{clip-path:inset(100%)}',
+  'p{transform:scale(0)}',
+  'p{height:0;overflow:hidden}',
+  'p{font-size:1px}',
+  'p{position:absolute;left:-9999px}',
+];
+for (const t of tasks.slice(0, 6)) {
+  for (const rule of OFFSCREEN) {
+    const hidden = inStyles(t.expected, (b) => `${b}\n${rule}`);
+    const good = await benchmark.score(t, { answer: hidden });
+    assert.equal(good.score, 1, `${t.id} offscreen "${rule}" on a correct fix scored ${good.score}`);
+    const stillBroken = await benchmark.score(t, { answer: inStyles(brokenOf(t.prompt), (b) => `${b}\n${rule}`) });
+    assert.equal(stillBroken.score, 0, `${t.id} offscreen "${rule}" rescued a broken page (score ${stillBroken.score})`);
+  }
+}
 
 // ---- Hidden split: public reference pages must not transfer ----
 // Regenerate with a private seed; hidden ids use the a11yh- prefix and

@@ -219,12 +219,19 @@ private seed - pick your own.
 
 ## Limits
 
-The static analyzer cannot run layout, zoom, or assistive technology,
-and it reads only hex and common named colors for contrast. Fixtures
-are small synthetic pages, not production sites. Public tasks can enter
-training data, so keep a separately seeded hidden split for final
-comparisons. Remote providers can add cost and retain prompts under
-their own policies.
+The static analyzer cannot run layout, zoom, or assistive technology.
+Contrast resolves hex, `rgb()`, `hsl()`, the full named-color list,
+`var()` custom properties, and `inherit` through a small cascade.
+Concealment that leaves the element in the parsed render — `clip-path`,
+`transform: scale(0)`, zero height, `font-size: 1px`, off-screen
+positioning — is neither rewarded nor penalized today (the same
+machinery powers the legitimate `.sr-only` pattern); the E2E gate pins
+that policy. Hard tasks share one generator family, so a fixer written
+against it would clear the tier; the benchmark claims difficulty against
+unseen structure, not template-proofness. Fixtures are small synthetic
+pages, not production sites. Public tasks can enter training data, so
+keep a separately seeded hidden split for final comparisons. Remote
+providers can add cost and retain prompts under their own policies.
 
 ## Integration guides
 
