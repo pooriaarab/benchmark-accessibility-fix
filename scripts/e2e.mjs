@@ -19,6 +19,27 @@ assert.equal(report.rows.length, taskCount);
 assert.ok(report.rows.some((row) => row.score === 1));
 assert.ok(report.rows.some((row) => row.score === 0));
 
+// Grader passes through the SDK: the mock's good policy (task.expected)
+// must score 1 on every task, while trivial bad answers score 0.
+const { benchmark } = await import("../dist/index.js");
+const brokenOf = (prompt) => prompt.match(/```html\s*([\s\S]*?)```/)?.[1] ?? "";
+const badAnswers = (task) => [
+  "",
+  "lorem ipsum dolor sit amet consectetur adipiscing elit",
+  "Yes, this page is fully accessible and needs no changes.",
+  brokenOf(task.prompt),
+];
+let goodHits = 0;
+for (const task of await benchmark.listTasks()) {
+  const good = await benchmark.score(task, { answer: task.expected });
+  assert.equal(good.score, 1, `${task.id} good answer scored ${good.score}: ${good.reason}`);
+  if (good.score === 1) goodHits += 1;
+  for (const answer of badAnswers(task)) {
+    const bad = await benchmark.score(task, { answer });
+    assert.equal(bad.score, 0, `${task.id} bad answer scored ${bad.score}: ${bad.reason}`);
+  }
+}
+
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
 const address = probe.address(); assert.ok(address && typeof address === "object");
@@ -57,7 +78,7 @@ try {
   }
 } finally { await client.close(); }
 
-const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames };
+const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4 } };
 await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
 assert.match(await readFile("data/PROVENANCE.md", "utf8"), /Synthetic accessibility fixtures/);
