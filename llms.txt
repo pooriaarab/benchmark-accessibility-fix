@@ -21,7 +21,7 @@ The root exports `benchmark`, `run`, and `score`. `benchmark-accessibility-fix/a
 
 ## Commands
 
-The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification.
+The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification. `--tasks <path>` swaps in an alternate task list; the SDK takes `tasksPath`, the API takes `?tasks=` or a `tasksPath` body field (bounded by `A11Y_TASK_DIRS`), and the MCP server follows `A11Y_TASKS`.
 
 ## Data and grading
 

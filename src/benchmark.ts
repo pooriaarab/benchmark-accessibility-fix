@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
-import { defineBenchmark, type JsonValue, type Task, type Trace } from "benchmark-core";
-import { analyze, CHECK_IDS, extractHtml, NEEDS_TARGETS, type CheckId } from "./a11y.js";
+import { defineBenchmark, type Benchmark, type BenchmarkDefinition, type JsonValue, type Task, type Trace } from "benchmark-core";
+import { analyze, buildCtx, CHECK_IDS, extractHtml, NEEDS_TARGETS, type CheckId } from "./a11y.js";
+
+export async function loadTasksFrom(path: string | URL): Promise<Task[]> {
+  const text = await readFile(path, "utf8");
+  return text.trim().split("\n").map((line) => JSON.parse(line) as Task);
+}
 
 async function loadTasks(): Promise<Task[]> {
-  const text = await readFile(new URL("../data/tasks.jsonl", import.meta.url), "utf8");
-  return text.trim().split("\n").map((line) => JSON.parse(line) as Task);
+  return loadTasksFrom(new URL("../data/tasks.jsonl", import.meta.url));
 }
 
 function isCheckId(value: unknown): value is CheckId {
@@ -40,11 +44,13 @@ function recall(brokenWords: string[], fixedWords: string[]): number {
 export function gradeAnswer(task: Task, submission: Trace): { score: number; reason: string; details: Record<string, JsonValue> } {
   const answer = submission.answer;
   if (answer === undefined || answer.trim() === "") {
-    return { score: 0, reason: "Submission has no answer.", details: { defectsFixed: 0, regressions: 0, contentLost: true } };
+    return { score: 0, reason: "Submission has no answer.", details: { defectsFixed: 0, regressions: 0, contentLost: true, autoZero: true } };
   }
   const defects = injectedDefects(task);
-  const broken = analyze(extractHtml(task.prompt));
-  const fixed = analyze(extractHtml(answer));
+  const brokenHtml = extractHtml(task.prompt);
+  const fixedHtml = extractHtml(answer);
+  const broken = analyze(brokenHtml);
+  const fixed = analyze(fixedHtml);
   const byId = (checks: ReturnType<typeof analyze>["checks"], id: CheckId) => checks.find((c) => c.id === id);
   const fixedIds = defects.filter((id) => {
     const check = byId(fixed.checks, id);
@@ -55,10 +61,40 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
   const contentLost = contentRatio < 0.9;
   const keys = Object.keys(broken.counts) as (keyof typeof broken.counts)[];
   const elementRemoved = keys.some((key) => fixed.counts[key] < broken.counts[key]);
-  const hideAbuse = fixed.hideCount > broken.hideCount;
-  const raw = (fixedIds.length - 0.5 * regressions.length - (contentLost ? 1 : 0) - (hideAbuse ? 1 : 0) - (elementRemoved ? 1 : 0)) / Math.max(1, defects.length);
-  const score = Math.min(1, Math.max(0, raw));
-  const reason = `Fixed ${fixedIds.length}/${defects.length} defects; ${regressions.length} regressions; text kept ${(contentRatio * 100).toFixed(0)}%.`;
+  // Element-wise, not count-wise: a fix that drops the page's hidden
+  // widget but hides `main` in its place keeps the count level while
+  // still concealing content.
+  const brokenHidden = new Set(broken.hidden);
+  const hideAbuse = fixed.hidden.some((key) => !brokenHidden.has(key));
+  // A defect that still fails counts as silenced when the answer carries a
+  // quieting gesture (empty alt, empty aria-label, negating focus rule)
+  // rather than a repair.
+  const silenced = defects.filter((id) => {
+    const check = byId(fixed.checks, id);
+    const stillFails = check === undefined || !check.pass || (NEEDS_TARGETS.has(id) && check.targets === 0);
+    return stillFails && check !== undefined && check.silenced;
+  });
+  // Dropping every stylesheet and every inline style deletes the page's
+  // styling outright; contrast passing by default is not a repair. The
+  // test runs on the parsed document so a `<style>` inside an HTML
+  // comment or the text `style=` in prose does not count as styling.
+  const hasStyles = (html: string): boolean =>
+    buildCtx(html).doc.els.some((e) => e.tag === "style" || e.attrs["style"] !== undefined);
+  const stylesDeleted = hasStyles(brokenHtml) && !hasStyles(fixedHtml);
+  const causes = [
+    contentLost ? "content lost" : null,
+    elementRemoved ? "element removed" : null,
+    hideAbuse ? "content hidden" : null,
+    stylesDeleted ? "styles deleted" : null,
+    silenced.length ? `silenced ${silenced.join(",")}` : null,
+  ].filter((c): c is string => c !== null);
+  const autoZero = causes.length > 0;
+  const raw = (fixedIds.length - 0.5 * regressions.length) / Math.max(1, defects.length);
+  const score = autoZero ? 0 : Math.min(1, Math.max(0, raw));
+  const tier = (task.metadata as Record<string, JsonValue> | undefined)?.["tier"];
+  let reason = `Fixed ${fixedIds.length}/${defects.length} defects; ${regressions.length} regressions; text kept ${(contentRatio * 100).toFixed(0)}%.`;
+  if (autoZero) reason += ` Auto-zero: ${causes.join("; ")}.`;
+  if (typeof tier === "string") reason += ` Tier: ${tier}.`;
   return {
     score,
     reason,
@@ -71,11 +107,15 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
       contentRatio: Math.round(contentRatio * 1000) / 1000,
       hideAbuse,
       elementRemoved,
+      stylesDeleted,
+      silenced,
+      autoZero,
+      ...(typeof tier === "string" ? { tier } : {}),
     },
   };
 }
 
-export const benchmark = defineBenchmark({
+const definition: BenchmarkDefinition<Task> = {
   id: "benchmark-accessibility-fix", name: "Accessibility Fix", tagline: "Fix a broken page so keyboard, screen-reader and contrast checks pass.", tags: ["helpful"], category: "coding",
   whatItMeasures: "Whether a fixed HTML page really repairs injected keyboard, screen-reader, and contrast defects without deleting or hiding content.", version: "0.1.0", status: "alpha", loadTasks,
   async grade(task, submission) {
@@ -83,9 +123,18 @@ export const benchmark = defineBenchmark({
   },
   provenance: [{
     name: "Synthetic accessibility fixtures", kind: "synthetic", url: "https://github.com/pooriaarab/benchmark-accessibility-fix/blob/main/scripts/gen-tasks.mjs",
-    licence: "MIT", howToGet: "Run `node scripts/gen-tasks.mjs --seed 20261015` from the repository root. A hidden split uses another seed: `node scripts/gen-tasks.mjs --seed <n> --split hidden --out <path>`; hidden files stay out of git and npm.", retrievedAt: "2026-10-16T00:00:00.000Z",
+    licence: "MIT", howToGet: "Run `npm run generate:tasks` (or `node scripts/gen-tasks.mjs --seed 20261015` after `npm run build`) from the repository root. The generator grades every reference page with the built package and re-draws until it scores 1. A hidden split uses another seed: `node scripts/gen-tasks.mjs --seed <n> --split hidden --out <path>`; hidden files use a11yh- ids and stay out of git and npm.", retrievedAt: "2026-10-16T00:00:00.000Z",
     contaminationNotes: "Public tasks use seed 20261015. Treat them as possibly in training data; use a separately seeded hidden split for final comparisons.",
     refresh: "Change the seed, run the generator, and review the JSONL diff.",
   }],
   gradingMethod: "Deterministic static analysis of the fixed HTML: ten WCAG-cited checks score defects fixed, minus regressions, content loss, element removal, and hiding abuse. Model judging is off.",
-});
+};
+
+export const benchmark = defineBenchmark(definition);
+
+// benchmark-core caches the task list inside each benchmark object, so an
+// alternate task file (a hidden split, a filtered list) needs a fresh
+// object built from the same definition.
+export function makeBenchmark(tasksPath: string | URL): Benchmark<Task> {
+  return defineBenchmark({ ...definition, loadTasks: () => loadTasksFrom(tasksPath) });
+}
