@@ -329,6 +329,40 @@ try {
   assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP A11Y_TASKS returned public ids");
 } finally { await hiddenClient.close(); }
 
+// The run_benchmark success path needs an OpenRouter key, so it runs
+// in-process: createMcpServer is exported from dist/mcp.js, the stub
+// fetch below answers the wire call with each task's reference fix, and
+// the result must carry the same enriched report the CLI prints.
+{
+  const { createMcpServer } = await import("../dist/mcp.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const byPrompt = new Map(tasks.map((t) => [t.prompt, t]));
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.match(String(url), /openrouter\.ai\/api\/v1\/chat\/completions/, `unexpected wire call ${url}`);
+    const task = byPrompt.get(JSON.parse(init.body).messages[0].content);
+    assert.ok(task !== undefined, "model call carried an unknown prompt");
+    return Response.json({ choices: [{ message: { content: task.expected } }] });
+  };
+  process.env.OPENROUTER_API_KEY = "e2e-stub";
+  try {
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const stubClient = new Client({ name: "benchmark-accessibility-fix-e2e-run", version: "0.1.0" });
+    await createMcpServer().connect(serverSide);
+    await stubClient.connect(clientSide);
+    try {
+      const ran = await stubClient.callTool({ name: "run_benchmark", arguments: { model: "e2e-stub" } });
+      assert.notEqual(ran.isError, true, `run_benchmark errored against the stub: ${ran.content[0].text}`);
+      const enriched = JSON.parse(ran.content[0].text);
+      assert.equal(enriched.totals.passed, taskCount, "stub run did not clear every task");
+      assert.ok(enriched.tiers?.easy && enriched.rows.every((r) => r.details?.tier), "run_benchmark result lacks the breakdown");
+    } finally { await stubClient.close(); }
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.OPENROUTER_API_KEY;
+  }
+}
+
 const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked } };
 await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
