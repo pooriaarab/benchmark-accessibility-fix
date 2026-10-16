@@ -54,7 +54,10 @@ export interface Analysis {
   checks: CheckResult[];
   words: string[];
   counts: ElementCounts;
-  hideCount: number;
+  // Sorted keys of the elements carrying a hide signal. Compared
+  // element-wise (not by count) so a fix cannot trade one hidden
+  // element for another.
+  hidden: string[];
 }
 
 
@@ -327,7 +330,13 @@ function checkDivButton(ctx: Ctx): CheckResult {
         continue;
       }
     }
-    if (e.tag !== "div" && e.tag !== "span") continue;
+    // Native widgets carry their own focus and key behavior. Every
+    // other element - a `p` with role="button" fails the same way a
+    // `div` does - must prove keyboard support to count as repaired.
+    const nativeWidget = FOCUSABLE.has(e.tag)
+      && !(["a", "area"].includes(e.tag) && e.attrs["href"] === undefined)
+      && !(e.tag === "input" && (e.attrs["type"] ?? "text").toLowerCase() === "hidden");
+    if (nativeWidget) continue;
     const role = (e.attrs["role"] ?? "").toLowerCase();
     const kb = hasHandler(e, KEY_HANDLERS);
     const handler = hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS]);
@@ -419,6 +428,7 @@ function declShowsOn(el: El, d: Decl, ctx: Ctx): boolean {
     const which = prop === "background-color" || prop === "background" ? "background-color" : "color";
     const r = resolveColorString(el, which, token, ctx, 0);
     if (r === "transparent" || r === "unresolvable") return false;
+    if (r.a <= 0.02) return false;
     const bg = effectiveBackground(el, ctx);
     if (bg !== "unresolvable" && sameColor(r, bg)) return false;
     if (prop === "color") {
@@ -431,12 +441,15 @@ function declShowsOn(el: El, d: Decl, ctx: Ctx): boolean {
   let meaningful = 0;
   let paintedBg = 0;
   let nonzeroLen = false;
-  for (const t of d.value.split(/\s+/)) {
+  // Collapse whitespace inside functional notation so `rgba(0, 0, 0, 0)`
+  // stays one token.
+  const value = d.value.replace(/\([^)]*\)/g, (m) => m.replace(/\s+/g, ""));
+  for (const t of value.split(/\s+/)) {
     if (t === "" || NEGATING.test(t)) continue;
     if (/^transparent$/i.test(t)) { paintedBg += 1; continue; }
     const c = parseNumericColor(t);
     if (c !== null) {
-      if (bg !== "unresolvable" && sameColor(c, bg)) paintedBg += 1;
+      if (c.a <= 0.02 || (bg !== "unresolvable" && sameColor(c, bg))) paintedBg += 1;
       else meaningful += 1;
       continue;
     }
@@ -529,16 +542,36 @@ const HIDE_VALUE: Record<string, RegExp> = {
   color: /^transparent$/i,
 };
 
-function hideSignals(ctx: Ctx): number {
+// Which elements carry a hide signal, as keys stable across a
+// broken/fixed pair: `tag#id` or `tag.class`, with a document-order
+// ordinal when the base repeats. Comparing keys instead of counts
+// catches a fix that drops one hidden element but hides a different
+// one in its place.
+function hiddenKeys(ctx: Ctx): Set<string> {
   const isHide = (d: Decl) => HIDE_VALUE[d.prop]?.test(d.value.trim()) === true;
-  let n = 0;
+  const ordinals = new Map<string, number>();
+  const keyOf = (e: El): string => {
+    const id = (e.attrs["id"] ?? "").trim();
+    const cls = (e.attrs["class"] ?? "").split(/\s+/).filter(Boolean).sort().join(".");
+    const base = `${e.tag}${id !== "" ? `#${id}` : ""}${cls !== "" ? `.${cls}` : ""}`;
+    const n = ordinals.get(base) ?? 0;
+    ordinals.set(base, n + 1);
+    return n === 0 ? base : `${base}~${n}`;
+  };
+  const keys = new Map<number, string>();
+  for (const e of ctx.doc.els) keys.set(e.order, keyOf(e));
+  const hidden = new Set<string>();
+  const mark = (e: El) => hidden.add(keys.get(e.order) ?? e.tag);
   for (const e of ctx.doc.els) {
-    if (e.attrs["hidden"] !== undefined) n += 1;
-    if ((e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") n += 1;
-    n += parseDecls(e.attrs["style"] ?? "", 0).filter(isHide).length;
+    if (e.attrs["hidden"] !== undefined) mark(e);
+    if ((e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") mark(e);
+    if (parseDecls(e.attrs["style"] ?? "", 0).some(isHide)) mark(e);
   }
-  for (const r of ctx.rules) n += r.decls.filter(isHide).length;
-  return n;
+  for (const r of ctx.rules) {
+    if (!r.decls.some(isHide)) continue;
+    for (const sel of r.sels) for (const e of ctx.doc.els) if (matchSelector(e, sel)) mark(e);
+  }
+  return hidden;
 }
 
 // ---------- public surface ----------
@@ -576,7 +609,7 @@ export function analyze(html: string): Analysis {
     if (/^h[1-6]$/.test(e.tag) || (e.attrs["role"] ?? "").toLowerCase() === "heading") counts.heading += 1;
     if (isControl(e)) counts.control += 1;
   }
-  const hideCount = hideSignals(ctx);
+  const hidden = [...hiddenKeys(ctx)].sort();
   return {
     checks: [
       checkAlt(ctx), checkLabels(ctx), checkContrast(ctx), checkHeadings(ctx),
@@ -585,6 +618,6 @@ export function analyze(html: string): Analysis {
     ],
     words: visibleWords(html),
     counts,
-    hideCount,
+    hidden,
   };
 }

@@ -14,7 +14,11 @@ stays 0.1.0 until the first npm release.
 - `easy` and `hard` tiers. Hard tasks use a separate page skeleton -
   grouped fields named by `aria-labelledby` chains, a `role="tablist"`
   widget, a table with spanning headers - so a template-aware regex
-  fixer scores 1.000 on easy and about 0.36 on hard in the E2E gate.
+  fixer scores 1.000 on easy and about 0.45 on hard in the E2E gate.
+  The hard skeleton is still one generator family: a fixer written
+  against it would clear the tier, so the benchmark claims difficulty
+  against unknown structure, not against a fixer that has seen the
+  generator.
 - `--tasks <path>` on the CLI, `tasksPath` on the SDK, `?tasks=` and
   `tasksPath` on the HTTP API (allow-listed by `A11Y_TASK_DIRS`), and
   `A11Y_TASKS` for the MCP server.
@@ -34,7 +38,14 @@ stays 0.1.0 until the first npm release.
   inside an `aria-hidden="true"` subtree.
 - `no-focus-style` requires the focus rule's base selector to match a
   rendered focusable element and the indicator to be visible (not
-  `none`, `0`, `transparent`, or the backdrop color).
+  `none`, `0`, `transparent`, a fully transparent `rgba()`/`hsla()`
+  color, or the backdrop color).
+- `div-button` checks every non-native element with a handler or an
+  interactive role, not just `div`/`span`: a `p role="button"` without
+  a non-negative `tabindex` fails the same way.
+- `hideAbuse` compares which elements carry a hide signal, not how
+  many: revealing a page's `aria-hidden` widget while hiding `main`
+  with `opacity: 0` now auto-zeros instead of scoring 1.
 - `stylesDeleted` reads parsed markup, so a `<style>` tag inside an HTML
   comment or `style=` in prose no longer counts as styling.
 

@@ -19,9 +19,9 @@ criterion by number only:
 | `low-contrast` | 1.4.3 | Every rendered text element reaches 4.5:1, or 3:1 for large text (>= 24px, or >= 18.66px bold), after cascade and inheritance. |
 | `heading-order` | 1.3.1 | First heading is `h1`, exactly one `h1`, no skipped levels going up. `role="heading"` with `aria-level` counts. |
 | `tabindex-positive` | 2.4.3 | No `tabindex` greater than zero; no negative `tabindex` on a natively focusable element (it drops the control from the tab order); and no key handler that traps focus by cancelling keys unconditionally (`event.preventDefault()` alone, `return false`) or on Tab specifically (also WCAG 2.1.2). Cancelling a named non-Tab key is a normal repair. |
-| `div-button` | 4.1.2 | No `div` or `span` that acts like a control: mouse/keyboard handlers, an interactive role without keyboard support, or a button-styled dead element. A `role="button"` with a keyboard handler passes only with a `tabindex` of 0 or more, so the element can take keyboard focus. No control may sit inside an `a[href]` or `button` (nested interactive), or inside an `aria-hidden="true"` subtree, which hides a focusable element from assistive technology. |
+| `div-button` | 4.1.2 | No non-native element (`div`, `span`, `p`, ...) that acts like a control: mouse/keyboard handlers, an interactive role without keyboard support, or a button-styled dead element. A `role="button"` with a keyboard handler passes only with a `tabindex` of 0 or more, so the element can take keyboard focus. No control may sit inside an `a[href]` or `button` (nested interactive), or inside an `aria-hidden="true"` subtree, which hides a focusable element from assistive technology. |
 | `missing-lang` | 3.1.1 | The `html` element carries a non-empty `lang`. |
-| `no-focus-style` | 2.4.7 | A `:focus`/`:focus-visible`/`:focus-within` rule draws a visible indicator: outline, border, shadow, background, or text decoration that is not `none`/`0`/`transparent` and not the same color as the backdrop. The rule's selector (state pseudos stripped) must match a rendered focusable element; a rule that matches nothing, or only paints invisible colors, does not count. |
+| `no-focus-style` | 2.4.7 | A `:focus`/`:focus-visible`/`:focus-within` rule draws a visible indicator: outline, border, shadow, background, or text decoration that is not `none`/`0`/`transparent`, not fully transparent (`rgba()`/`hsla()` with alpha 0), and not the same color as the backdrop. The rule's selector (state pseudos stripped) must match a rendered focusable element; a rule that matches nothing, or only paints invisible colors, does not count. |
 | `empty-link` | 2.4.4 | Every `a` has text, a non-empty `aria-label`, or an image with `alt`. `aria-labelledby` follows the same chain rule as `unlabeled-input`: when present it wins over link text, so a reference that resolves to nothing makes the link unnamed. |
 | `table-headers` | 1.3.1 | Every `table` contains at least one `th` or a cell with `role="columnheader"`/`"rowheader"`. |
 
@@ -38,7 +38,7 @@ table with spanning headers, a card link region - and some defects only
 exist in that shape: a name chain cut in the middle, a key handler that
 swallows Tab, a control nested inside a link, a widget wrapped in
 `aria-hidden`. A template-aware regex fixer that scores 1.000 on every
-easy task scores about 0.47 on hard tasks (the E2E gate measures this on
+easy task scores about 0.45 on hard tasks (the E2E gate measures this on
 the public and hidden splits and fails above 0.75). The hard skeleton is
 still one generator family, so a fixer written against *it* would clear
 the tier; the benchmark claims difficulty against unknown structure, not
@@ -58,7 +58,9 @@ against a fixer that has seen the generator.
 5. **Hiding the offender.** New `display: none`, `visibility: hidden`,
    `aria-hidden="true"`, `hidden`, `opacity: 0`, zero font-size,
    off-screen `text-indent`, or `color: transparent` compared with the
-   original page scores 0.
+   original page scores 0. The comparison is element-wise, not a count:
+   a page that already hides one element does not earn a free hide on a
+   different element.
 6. **Fixing one defect while adding another.** Checks that passed on the
    original page and fail on the fixed page count as regressions and
    subtract half a defect each.
