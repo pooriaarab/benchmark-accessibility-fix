@@ -1,6 +1,8 @@
 import { run as runBenchmark, type ModelAdapter, type RunOptions, type Trace } from "benchmark-core";
 import { benchmark, makeBenchmark } from "./benchmark.js";
+import { enrichReport, type EnrichedReport } from "./report.js";
 export { benchmark, makeBenchmark };
+export type { EnrichedReport } from "./report.js";
 
 export interface AccessibilityFixRunOptions extends RunOptions {
   // Path to an alternate tasks JSONL (for example a hidden split from
@@ -9,9 +11,10 @@ export interface AccessibilityFixRunOptions extends RunOptions {
   tasksPath?: string;
 }
 
-export const run = (adapter: ModelAdapter, options?: AccessibilityFixRunOptions) => {
+export const run = (adapter: ModelAdapter, options?: AccessibilityFixRunOptions): Promise<EnrichedReport> => {
   const { tasksPath, ...rest } = options ?? {};
-  return runBenchmark(tasksPath === undefined ? benchmark : makeBenchmark(tasksPath), adapter, rest);
+  const bench = tasksPath === undefined ? benchmark : makeBenchmark(tasksPath);
+  return runBenchmark(bench, adapter, rest).then((report) => enrichReport(bench, report));
 };
 
 export async function score(taskId: string, submission: Trace, options?: { tasksPath?: string }) {

@@ -91,7 +91,11 @@ used to pass, deleted text or removed elements, and newly hidden content
 (`display: none`, `visibility: hidden`, `aria-hidden`). The per-task
 `details` object reports `defectsFixed`, `regressions`, and
 `contentLost` separately, so a low score tells you which behavior broke.
-The report mean comes with a bootstrap 95% confidence interval.
+The report mean comes with a bootstrap 95% confidence interval. `run` and
+`score` print a per-tier table (solved n/N, defects fixed, regressions,
+content lost per tier) after the task table, and `--json` adds a
+`details` object to every row plus a `tiers` summary; the SDK `run()`
+and the MCP `run_benchmark` result carry the same fields.
 
 There is no public leaderboard yet. Until real models are run and
 published, the only reference number is the mock's 50%.
