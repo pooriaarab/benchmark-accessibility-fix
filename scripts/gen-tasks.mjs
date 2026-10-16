@@ -65,8 +65,11 @@ const ratio = (a, b) => {
 };
 const hex = (rng, lo, hi) => "#" + [0, 1, 2].map(() => (lo + Math.floor(rng() * (hi - lo + 1))).toString(16).padStart(2, "0")).join("");
 
-// A passing foreground/background pair at >= minRatio.
-function goodPair(rng, minRatio = 4.5) {
+// A passing foreground/background pair at >= minRatio. The default
+// carries margin over the 4.5:1 rule so equivalent color spellings
+// (hsl() with rounded channels, 8-digit hex) cannot dip a reference
+// page under the threshold.
+function goodPair(rng, minRatio = 4.75) {
   for (let tries = 0; tries < 200; tries++) {
     const bg = hex(rng, 200, 255);
     const fg = hex(rng, 0, 120);
@@ -84,14 +87,25 @@ function badFg(rng, bg) {
   }
   return "#8a8a8a";
 }
+// A passing foreground on a FIXED background: the inline span inherits
+// the body background, so it must be drawn against it, not against a
+// throwaway pair bg.
+function goodFg(rng, bg, minRatio = 4.75) {
+  for (let tries = 0; tries < 400; tries++) {
+    const fg = hex(rng, 0, 130);
+    if (ratio(fg, bg) >= minRatio) return fg;
+  }
+  throw new Error("no good foreground found");
+}
 // A large-text pair in the passing 3:1-4.5 band (valid fix, tests the
-// large-text threshold).
+// large-text threshold). The 3.3 floor leaves room for color-format
+// rounding noise, same margin idea as goodPair.
 function largePair(rng) {
   for (let tries = 0; tries < 300; tries++) {
     const bg = hex(rng, 200, 255);
     const fg = hex(rng, 60, 160);
     const r = ratio(fg, bg);
-    if (r >= 3.05 && r < 4.5) return { fg, bg };
+    if (r >= 3.3 && r < 4.5) return { fg, bg };
   }
   throw new Error("no large pair found");
 }
@@ -178,7 +192,7 @@ function buildFixed(rng) {
   // Colors: every pair is generated to pass.
   const body = goodPair(rng);
   const note = goodPair(rng);
-  const spanFg = goodPair(rng, 4.5).fg;
+  const spanFg = goodFg(rng, body.bg);
   const cta = goodPair(rng);
   const focusColor = goodPair(rng).fg;
   // A large-text heading pair in the legal 3:1-4.5 band keeps the
@@ -279,7 +293,7 @@ function buildHard(rng) {
   const cells = pickN(rng, CELLS, 4);
   const body = goodPair(rng);
   const note = goodPair(rng);
-  const spanFg = goodPair(rng, 4.5).fg;
+  const spanFg = goodFg(rng, body.bg);
   const cta = goodPair(rng);
   const tabPair = goodPair(rng);
   const focusColor = goodPair(rng).fg;
@@ -302,7 +316,8 @@ a:focus-visible,.${ctaClass}:focus-visible,[role=tab]:focus-visible{outline:3px 
   const tabB = `<div role="tab" tabindex="0" onkeydown="pickTab('b')" aria-selected="false">${tabs[1]}</div>`;
   const tabsOpen = `<div class="tabs" role="tablist" aria-labelledby="tabs-title">`;
   const label = `<label for="hf2">${f1[1]}</label>`;
-  const cardLink = `<a href="/${cardText.toLowerCase()}">${cardText}</a>`;
+  const cardHref = `/${cardText.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const cardLink = `<a href="${cardHref}">${cardText}</a>`;
   const table = `<table>
 <caption>${caption}</caption>
 <tr><th scope="col">${colheads[0]}</th><th colspan="2" scope="colgroup">${colheads[1]}</th></tr>
@@ -377,7 +392,7 @@ ${sections[3]}
       skip,
       archive: `<a href="/archive">Archive</a>`,
       cardLink,
-      cardHref: `/${cardText.toLowerCase()}`,
+      cardHref,
       cardText,
       heading3: `<h3 id="tabs-title">${h2b}</h3>`,
     },
@@ -454,7 +469,7 @@ const HARD_BREAKERS = {
   }, "tab order bent"],
   "div-button": (h, rng) => {
     const v = rng();
-    if (v < 0.4) return [(p) => p.replace(`<p>${h.hooks.cardLink} ${h.hooks.ctaButton}</p>`, `<p><a href="${h.cardHref}">${h.cardText}<div class="cta-div" onclick="go()">${h.hooks.ctaText}</div></a></p>`), "control nested in link"];
+    if (v < 0.4) return [(p) => p.replace(`<p>${h.hooks.cardLink} ${h.hooks.ctaButton}</p>`, `<p><a href="${h.hooks.cardHref}">${h.hooks.cardText}<div class="cta-div" onclick="go()">${h.hooks.ctaText}</div></a></p>`), "control nested in link"];
     if (v < 0.7) return [(p) => p.replace(h.hooks.tabA, h.hooks.tabA.replace(' tabindex="0" onkeydown="pickTab(\'a\')"', "")), "tab lost keyboard support"];
     return [(p) => p.replace(h.hooks.tabsOpen, h.hooks.tabsOpen.replace(/>$/, ' aria-hidden="true">')), "widget hidden from AT"];
   },
@@ -488,13 +503,44 @@ Repair every defect you find: image text alternatives, input labels, text contra
 
 Return the complete fixed HTML document.`;
 
+// Verification imports the real grader from the built package: an
+// expected page is only a valid reference when it scores exactly 1.
+const { benchmark } = await import(new URL("../dist/index.js", import.meta.url).href).catch(() => {
+  throw new Error("dist/index.js not found - run `npm run build` before generating tasks");
+});
+
+// Tokens that mean a template leak: a breaker or builder read a field
+// that does not exist and strung the result into the page.
+const JUNK = /\bundefined\b|\bNaN\b|\[object Object\]|\bnull\b/;
+const assertNoJunk = (where, text) => {
+  if (JUNK.test(text)) throw new Error(`generated ${where} contains a template-leak token`);
+};
+
+// Grade the fixed page as if every check were an injected defect: the
+// score is exactly 1 iff all ten checks pass with real targets. A page
+// that fails any check gets re-drawn; a reference that caps its own
+// task below 1 must never ship.
+const ALL_DEFECTS = CHECKS.map(([id]) => id);
+async function expectedScoresOne(html) {
+  const probe = { id: "a11y-probe", kind: "single", prompt: `\`\`\`html\n${html}\n\`\`\``, expected: html, metadata: { defects: ALL_DEFECTS } };
+  const result = await benchmark.score(probe, { answer: html });
+  return result.score === 1;
+}
+
 const rng = mulberry32(seed);
 const tasks = [];
 const fingerprints = new Set();
 for (let i = 0; i < count; i++) {
   const tier = i % 3 === 2 ? "hard" : "easy";
-  const built = tier === "hard" ? buildHard(rng) : buildFixed(rng);
+  const build = tier === "hard" ? buildHard : buildFixed;
   const breakers = tier === "hard" ? HARD_BREAKERS : BREAKERS;
+  let built;
+  for (let attempt = 0; ; attempt += 1) {
+    built = build(rng);
+    assertNoJunk(`page ${i + 1}`, built.html);
+    if (await expectedScoresOne(built.html)) break;
+    if (attempt >= 199) throw new Error(`task ${i + 1}: no clean reference page after 200 draws`);
+  }
   const defects = pickDefects(rng, i, tier).sort();
   let broken = built.html;
   for (const id of defects) {
@@ -504,6 +550,7 @@ for (let i = 0; i < count; i++) {
     broken = next;
   }
   if (broken === built.html) throw new Error(`task ${i + 1} has no visible break`);
+  assertNoJunk(`task ${i + 1}`, broken);
   fingerprints.add(createHash("sha1").update(built.html.replace(/>\s*</g, "><").replace(/[\w.-]+(?=\.jpg|"[a-z-]+")/g, "#")).digest("hex").slice(0, 12));
   const idNum = String(i + 1).padStart(2, "0");
   tasks.push({
@@ -515,6 +562,7 @@ for (let i = 0; i < count; i++) {
       defects, wcag: defects.map((d) => WCAG[d]), tier, seed, split, taskSeed: seed + i,
     },
   });
+  assertNoJunk(`task ${i + 1} prompt`, tasks[tasks.length - 1].prompt);
 }
 const coverage = new Map(CHECKS.map(([id]) => [id, 0]));
 for (const task of tasks) for (const id of task.metadata.defects) coverage.set(id, coverage.get(id) + 1);

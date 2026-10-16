@@ -37,3 +37,16 @@ stays 0.1.0 until the first npm release.
   `none`, `0`, `transparent`, or the backdrop color).
 - `stylesDeleted` reads parsed markup, so a `<style>` tag inside an HTML
   comment or `style=` in prose no longer counts as styling.
+
+### Fixed
+
+- The hard-tier `div-button` breaker read `h.cardHref`/`h.cardText`
+  instead of `h.hooks.*`, writing `href="undefined"` into 9 of 13 public
+  hard prompts. The generator now throws when `undefined`, `NaN`,
+  `[object Object]` or `null` appears in any generated prompt or page,
+  and the E2E scans shipped and hidden data for the same tokens.
+- The inline note span is drawn against the body background it sits on;
+  a stray draw could land under 4.5:1 and make a reference page fail its
+  own grader. The generator grades every reference page with the built
+  package and re-draws until it scores exactly 1 (the E2E holds this
+  over 25 hidden seeds).
