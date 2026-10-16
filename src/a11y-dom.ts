@@ -65,8 +65,8 @@ export function parseNumericColor(v: string): Rgba | null {
       return { r: r ?? 0, g: g ?? 0, b: b ?? 0, a: alpha };
     }
     const h = (((parseFloat(parts[0] ?? "") % 360) + 360) % 360) / 360;
-    const s = num(parts[1] ?? "", 1);
-    const l = num(parts[2] ?? "", 1);
+    const s = num(parts[1] ?? "", 100);
+    const l = num(parts[2] ?? "", 100);
     if ([h, s, l].some(Number.isNaN) || s < 0 || s > 100 || l < 0 || l > 100) return null;
     const sn = s / 100; const ln = l / 100;
     const q = ln < 0.5 ? ln * (1 + sn) : ln + sn - ln * sn;
@@ -336,7 +336,12 @@ export function cascadedCustom(el: El, name: string, rules: Rule[], memo: Map<st
 // Extract the solid-color token from a background shorthand, if any.
 export function bgColorToken(value: string): string {
   const t0 = value.trim().toLowerCase();
+  // The whole declaration can itself be a color, including functional
+  // forms like rgb()/hsl() which contain no standalone color token.
+  if (parseNumericColor(t0)) return t0;
   if (/^(var\(|currentcolor$|transparent$|none$|inherit$|initial$|unset$|auto$)/.test(t0) && !/[\s,]/.test(t0)) return t0;
+  const fn = t0.match(/(?:rgba?|hsla?)\([^)]*\)/);
+  if (fn && parseNumericColor(fn[0] ?? "")) return fn[0] ?? t0;
   const tokens = t0.replace(/\([^)]*\)/g, " ").split(/[\s,]+/).filter(Boolean);
   for (const t of tokens) {
     if (parseNumericColor(t)) return t;
