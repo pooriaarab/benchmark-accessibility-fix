@@ -344,9 +344,11 @@ function checkDivButton(ctx: Ctx): CheckResult {
       && e.children.some((c) => typeof c === "string" && c.trim() !== "");
     const interactiveRole = INTERACTIVE_ROLES.has(role);
     // Role plus keyboard support is a repair only when the element can
-    // actually take focus: a non-negative tabindex, like a native control.
+    // actually take focus: a non-negative tabindex, like a native
+    // control. The attribute must be a valid integer - browsers ignore
+    // "" and "1.5", which leave the element unfocusable.
     const ti = e.attrs["tabindex"];
-    const tabOk = ti !== undefined && Number.isFinite(Number(ti.trim())) && Number(ti.trim()) >= 0;
+    const tabOk = ti !== undefined && /^-?\d+$/.test(ti.trim()) && Number(ti.trim()) >= 0;
     if (interactiveRole && kb && tabOk) continue;
     if (handler || interactiveRole || buttonish) {
       bad += 1;

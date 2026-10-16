@@ -164,10 +164,22 @@ for (const task of tasks) {
     const r = await benchmark.score(task, { answer });
     assert.ok(r.score < 1, `${task.id} invisible/unmatched focus "${name}" scored ${r.score}: ${r.reason}`);
   }
-  // A rule that does reach a control with a real indicator still passes.
-  const ok = task.expected.replace(FOCUS_RULE, "a:focus-visible{outline:2px dashed #123456}");
-  const good = await benchmark.score(task, { answer: ok });
-  assert.equal(good.score, 1, `${task.id} valid focus variant scored ${good.score}: ${good.reason}`);
+  // A rule that does reach a control with a real indicator still
+  // passes: a colored outline, a :focus-within rule on the container
+  // wrapping the controls, or an indicator drawn through the `color`
+  // property alone (shifted per task so it cannot equal the link's own
+  // color or the backdrop).
+  const linkHex = task.expected.match(/a\{[^}]*color:(#[0-9a-fA-F]{6})/)?.[1] ?? "#101418";
+  const flip = `#${linkHex.slice(1).match(/../g).map((x) => ((parseInt(x, 16) + 128) % 256).toString(16).padStart(2, "0")).join("")}`;
+  const okVariants = [
+    ["outline", "a:focus-visible{outline:2px dashed #123456}"],
+    ["focus-within", `main:focus-within{outline:2px solid ${flip}}`],
+    ["color-only", `a:focus-visible{color:${flip}}`],
+  ];
+  for (const [name, rule] of okVariants) {
+    const good = await benchmark.score(task, { answer: task.expected.replace(FOCUS_RULE, rule) });
+    assert.equal(good.score, 1, `${task.id} valid focus variant "${name}" scored ${good.score}: ${good.reason}`);
+  }
 }
 // A role="button" with a keyboard handler but no tabindex cannot take
 // focus; adding tabindex="0" completes the repair. Only tasks whose
@@ -186,6 +198,13 @@ for (const task of tasks.filter((t) => t.metadata.defects.includes("div-button")
   const para = task.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, '<p role="button" onkeydown="go()">$1</p>');
   const pBad = await benchmark.score(task, { answer: para });
   assert.ok(pBad.score < 1, `${task.id} p role=button without tabindex scored ${pBad.score}: ${pBad.reason}`);
+  // A tabindex the browser would drop (empty, or a non-integer) does not
+  // make the element focusable either.
+  for (const badTi of ['tabindex=""', 'tabindex="1.5"']) {
+    const weird = task.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, `<div role="button" onkeydown="go()" ${badTi}>$1</div>`);
+    const r = await benchmark.score(task, { answer: weird });
+    assert.ok(r.score < 1, `${task.id} role+keydown+${badTi} scored ${r.score}: ${r.reason}`);
+  }
 }
 
 // Cheap tricks must stay below 0.3; each quiets or bypasses a check.
