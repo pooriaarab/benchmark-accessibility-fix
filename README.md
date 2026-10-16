@@ -32,11 +32,14 @@ reference fix and half with garbage, so a 50% mock score means the grader
 sees both outcomes. The table above is excerpted from a real mock run.
 
 The 40 public tasks are synthetic fixtures built by
-`scripts/gen-tasks.mjs` (seed 20261015). Each page carries two to four
-seeded defects: missing alt text, unlabeled inputs, low contrast, broken
-heading order, positive `tabindex`, a `div` used as a button, a missing
-`lang` attribute, no visible focus style, an empty link, or a table
-without headers.
+`scripts/gen-tasks.mjs` (seed 20261015). Page text, section order, class
+names, and colors are randomized per seed, so no two tasks share a page.
+Each task carries two to five seeded defects: two or three on `easy`
+tasks, three to five on `hard` ones. Defect kinds: missing alt text,
+unlabeled inputs, low contrast, broken heading order, positive
+`tabindex`, a `div` used as a button, a missing `lang` attribute, no
+visible focus style, an empty link, or a table without headers. A
+separately seeded hidden split uses `a11yh-` ids and never enters git.
 
 ## Install
 
