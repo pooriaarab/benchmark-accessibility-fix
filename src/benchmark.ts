@@ -1,10 +1,14 @@
 import { readFile } from "node:fs/promises";
-import { defineBenchmark, type JsonValue, type Task, type Trace } from "benchmark-core";
+import { defineBenchmark, type Benchmark, type BenchmarkDefinition, type JsonValue, type Task, type Trace } from "benchmark-core";
 import { analyze, CHECK_IDS, extractHtml, NEEDS_TARGETS, type CheckId } from "./a11y.js";
 
-async function loadTasks(): Promise<Task[]> {
-  const text = await readFile(new URL("../data/tasks.jsonl", import.meta.url), "utf8");
+export async function loadTasksFrom(path: string | URL): Promise<Task[]> {
+  const text = await readFile(path, "utf8");
   return text.trim().split("\n").map((line) => JSON.parse(line) as Task);
+}
+
+async function loadTasks(): Promise<Task[]> {
+  return loadTasksFrom(new URL("../data/tasks.jsonl", import.meta.url));
 }
 
 function isCheckId(value: unknown): value is CheckId {
@@ -104,7 +108,7 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
   };
 }
 
-export const benchmark = defineBenchmark({
+const definition: BenchmarkDefinition<Task> = {
   id: "benchmark-accessibility-fix", name: "Accessibility Fix", tagline: "Fix a broken page so keyboard, screen-reader and contrast checks pass.", tags: ["helpful"], category: "coding",
   whatItMeasures: "Whether a fixed HTML page really repairs injected keyboard, screen-reader, and contrast defects without deleting or hiding content.", version: "0.1.0", status: "alpha", loadTasks,
   async grade(task, submission) {
@@ -117,4 +121,13 @@ export const benchmark = defineBenchmark({
     refresh: "Change the seed, run the generator, and review the JSONL diff.",
   }],
   gradingMethod: "Deterministic static analysis of the fixed HTML: ten WCAG-cited checks score defects fixed, minus regressions, content loss, element removal, and hiding abuse. Model judging is off.",
-});
+};
+
+export const benchmark = defineBenchmark(definition);
+
+// benchmark-core caches the task list inside each benchmark object, so an
+// alternate task file (a hidden split, a filtered list) needs a fresh
+// object built from the same definition.
+export function makeBenchmark(tasksPath: string | URL): Benchmark<Task> {
+  return defineBenchmark({ ...definition, loadTasks: () => loadTasksFrom(tasksPath) });
+}

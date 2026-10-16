@@ -3,6 +3,7 @@ import { execFile as execFileCallback, spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer as createNetServer } from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -186,11 +187,41 @@ for (const [i, h] of hidden.entries()) {
   if (r.score === 1) leaked += 1;
 }
 
+// ---- Alternate task paths on every surface ----
+// benchmark-core caches the task list inside each benchmark object, so
+// every path needs a fresh object. Run default, hidden, default, hidden
+// in ONE process and check the ids each time.
+const hiddenPath = resolve("artifacts/tasks.hidden.jsonl");
+const { makeBenchmark, run: runSdk } = await import("../dist/index.js");
+const { mockAdapter } = await import("benchmark-core");
+const seq = [];
+for (const path of [undefined, hiddenPath, undefined, hiddenPath]) {
+  const r = await runSdk(mockAdapter({ seed: 1 }), path === undefined ? {} : { tasksPath: path });
+  seq.push(r.rows);
+}
+assert.ok(seq[0].every((r) => r.taskId.startsWith("a11y-")), "default run lost a11y- ids");
+assert.ok(seq[1].every((r) => r.taskId.startsWith("a11yh-")), "hidden run lost a11yh- ids");
+assert.ok(seq[2].every((r) => r.taskId.startsWith("a11y-")), "second default run leaked hidden ids");
+assert.ok(seq[3].every((r) => r.taskId.startsWith("a11yh-")), "second hidden run leaked public ids");
+const listedHidden = await makeBenchmark(hiddenPath).listTasks();
+assert.equal(listedHidden.length, hidden.length);
+assert.equal((await benchmark.listTasks()).length, taskCount, "default benchmark cache was clobbered");
+// CLI --tasks swaps the list for any command.
+const cliList = await execFile(process.execPath, ["dist/cli.js", "list", "--tasks", hiddenPath, "--json"], { maxBuffer: 10_000_000 });
+assert.ok(JSON.parse(cliList.stdout).tasks.every((t) => t.id.startsWith("a11yh-")), "CLI --tasks list returned public ids");
+const cliRun = await execFile(process.execPath, ["dist/cli.js", "run", "--model", "offline", "--provider", "mock", "--tasks", hiddenPath, "--json"], { maxBuffer: 10_000_000 });
+assert.ok(JSON.parse(cliRun.stdout).rows.every((r) => r.taskId.startsWith("a11yh-")), "CLI --tasks run returned public ids");
+// npm users must be able to regenerate a split: the generator ships.
+const pack = await execFile("npm", ["pack", "--dry-run", "--json"], { maxBuffer: 10_000_000 });
+const packFiles = JSON.parse(pack.stdout)[0].files.map((f) => f.path);
+assert.ok(packFiles.includes("scripts/gen-tasks.mjs"), "npm pack drops scripts/gen-tasks.mjs");
+assert.ok(packFiles.includes("data/tasks.jsonl"), "npm pack drops data/tasks.jsonl");
+
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
 const address = probe.address(); assert.ok(address && typeof address === "object");
 await new Promise((resolve) => probe.close(resolve));
-const server = spawn(process.execPath, ["dist/cli.js", "serve", String(address.port)], { stdio: ["ignore", "pipe", "pipe"] });
+const server = spawn(process.execPath, ["dist/cli.js", "serve", String(address.port)], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, A11Y_TASK_DIRS: resolve("artifacts") } });
 const base = `http://127.0.0.1:${address.port}`; const routes = {};
 async function get(path) {
   const response = await fetch(`${base}${path}`); routes[`GET ${path}`] = response.status;
@@ -203,6 +234,16 @@ try {
   const shown = await get(`/v1/tasks/${firstId}`); assert.equal(shown.value.task.id, firstId);
   const score = await fetch(`${base}/v1/score`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: firstId, submission: report.rows[0].submission }) });
   routes["POST /v1/score"] = score.status; assert.equal(score.status, 200);
+  // API task-path option: inside an A11Y_TASK_DIRS directory is allowed,
+  // anything else is refused.
+  const hiddenListed = await get(`/v1/tasks?tasks=${encodeURIComponent(hiddenPath)}`);
+  assert.ok(hiddenListed.value.tasks.every((t) => t.id.startsWith("a11yh-")), "API ?tasks= returned public ids");
+  const hiddenScore = await fetch(`${base}/v1/score`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: hidden[0].id, tasksPath: hiddenPath, submission: { answer: hidden[0].expected } }) });
+  routes["POST /v1/score?tasksPath"] = hiddenScore.status;
+  assert.equal(hiddenScore.status, 200);
+  assert.equal((await hiddenScore.json()).score, 1, "hidden reference fix did not score 1 via tasksPath");
+  const outside = await get("/v1/tasks?tasks=/etc/passwd");
+  assert.equal(outside.response.status, 403, "API ?tasks=/etc/passwd was not refused");
   assert.equal((await get("/v1/provenance")).response.status, 200);
   assert.equal((await get("/v1/index-entry")).value.task_count, taskCount);
 } finally { if (server.exitCode === null) { server.kill("SIGTERM"); await once(server, "exit"); } }
@@ -223,6 +264,16 @@ try {
     if (name === "run_benchmark") assert.equal(result.isError, true); else assert.notEqual(result.isError, true);
   }
 } finally { await client.close(); }
+
+// The MCP surface follows A11Y_TASKS for an operator-picked split.
+const hiddenTransport = new StdioClientTransport({ command: process.execPath, args: ["dist/cli.js", "mcp"], cwd: process.cwd(), env: { ...process.env, A11Y_TASKS: hiddenPath }, stderr: "pipe" });
+const hiddenClient = new Client({ name: "benchmark-accessibility-fix-e2e-hidden", version: "0.1.0" });
+await hiddenClient.connect(hiddenTransport);
+try {
+  const result = await hiddenClient.callTool({ name: "list_tasks", arguments: {} });
+  const listed = JSON.parse(result.content[0].text).tasks;
+  assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP A11Y_TASKS returned public ids");
+} finally { await hiddenClient.close(); }
 
 const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked } };
 await mkdir("artifacts", { recursive: true });
