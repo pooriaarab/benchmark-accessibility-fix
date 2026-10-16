@@ -7,7 +7,7 @@
 import {
   ancestors, cascadeNumber, decode, elText, over, parseDecls, parseDoc,
   parseNumericColor, ratioOf, RAW_TEXT, rendered, resolveColor, styleRules,
-  type Ctx, type Doc, type El, type Resolved, type Rgba, type Rule,
+  type Ctx, type Decl, type Doc, type El, type Resolved, type Rgba, type Rule,
 } from "./a11y-dom.js";
 
 export const CHECK_IDS = [
@@ -318,6 +318,30 @@ function checkTables(ctx: Ctx): CheckResult {
   return { id: "table-headers", pass: bad.length === 0, targets: tables.length, silenced: false, detail: bad.length ? `${bad.length}/${tables.length} tables lack headers` : `${tables.length} tables headed` };
 }
 
+// Hiding signals are counted on parsed attributes and declarations only,
+// so prose containing the word "hidden" or "display" cannot inflate the
+// count. Sheet rules come from ctx.rules; inline styles are reparsed.
+const HIDE_VALUE: Record<string, RegExp> = {
+  display: /^none$/i,
+  visibility: /^(?:hidden|collapse)$/i,
+  opacity: /^0(?:\.0+)?$/,
+  "font-size": /^0(?:[a-z%]*)$/i,
+  "text-indent": /^-/,
+  color: /^transparent$/i,
+};
+
+function hideSignals(ctx: Ctx): number {
+  const isHide = (d: Decl) => HIDE_VALUE[d.prop]?.test(d.value.trim()) === true;
+  let n = 0;
+  for (const e of ctx.doc.els) {
+    if (e.attrs["hidden"] !== undefined) n += 1;
+    if ((e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") n += 1;
+    n += parseDecls(e.attrs["style"] ?? "", 0).filter(isHide).length;
+  }
+  for (const r of ctx.rules) n += r.decls.filter(isHide).length;
+  return n;
+}
+
 // ---------- public surface ----------
 
 export function visibleWords(html: string): string[] {
@@ -353,7 +377,7 @@ export function analyze(html: string): Analysis {
     if (/^h[1-6]$/.test(e.tag) || (e.attrs["role"] ?? "").toLowerCase() === "heading") counts.heading += 1;
     if (isControl(e)) counts.control += 1;
   }
-  const hideCount = (html.replace(/<!--[\s\S]*?-->/g, "").match(/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|aria-hidden\s*=\s*["']?true|\shidden(?=[\s=>/])|opacity\s*:\s*0(?![.\d])|font-size\s*:\s*0(?![.\d%])|text-indent\s*:\s*-\d|(?<![-\w])color\s*:\s*transparent/gi) ?? []).length;
+  const hideCount = hideSignals(ctx);
   return {
     checks: [
       checkAlt(ctx), checkLabels(ctx), checkContrast(ctx), checkHeadings(ctx),
