@@ -40,11 +40,13 @@ function recall(brokenWords: string[], fixedWords: string[]): number {
 export function gradeAnswer(task: Task, submission: Trace): { score: number; reason: string; details: Record<string, JsonValue> } {
   const answer = submission.answer;
   if (answer === undefined || answer.trim() === "") {
-    return { score: 0, reason: "Submission has no answer.", details: { defectsFixed: 0, regressions: 0, contentLost: true } };
+    return { score: 0, reason: "Submission has no answer.", details: { defectsFixed: 0, regressions: 0, contentLost: true, autoZero: true } };
   }
   const defects = injectedDefects(task);
-  const broken = analyze(extractHtml(task.prompt));
-  const fixed = analyze(extractHtml(answer));
+  const brokenHtml = extractHtml(task.prompt);
+  const fixedHtml = extractHtml(answer);
+  const broken = analyze(brokenHtml);
+  const fixed = analyze(fixedHtml);
   const byId = (checks: ReturnType<typeof analyze>["checks"], id: CheckId) => checks.find((c) => c.id === id);
   const fixedIds = defects.filter((id) => {
     const check = byId(fixed.checks, id);
@@ -56,9 +58,32 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
   const keys = Object.keys(broken.counts) as (keyof typeof broken.counts)[];
   const elementRemoved = keys.some((key) => fixed.counts[key] < broken.counts[key]);
   const hideAbuse = fixed.hideCount > broken.hideCount;
-  const raw = (fixedIds.length - 0.5 * regressions.length - (contentLost ? 1 : 0) - (hideAbuse ? 1 : 0) - (elementRemoved ? 1 : 0)) / Math.max(1, defects.length);
-  const score = Math.min(1, Math.max(0, raw));
-  const reason = `Fixed ${fixedIds.length}/${defects.length} defects; ${regressions.length} regressions; text kept ${(contentRatio * 100).toFixed(0)}%.`;
+  // A defect that still fails counts as silenced when the answer carries a
+  // quieting gesture (empty alt, empty aria-label, negating focus rule)
+  // rather than a repair.
+  const silenced = defects.filter((id) => {
+    const check = byId(fixed.checks, id);
+    const stillFails = check === undefined || !check.pass || (NEEDS_TARGETS.has(id) && check.targets === 0);
+    return stillFails && check !== undefined && check.silenced;
+  });
+  // Dropping every stylesheet and every inline style deletes the page's
+  // styling outright; contrast passing by default is not a repair.
+  const hadStyle = /<style[\s>]/i.test(brokenHtml) || /\bstyle\s*=/i.test(brokenHtml);
+  const stylesDeleted = hadStyle && !/<style[\s>]/i.test(fixedHtml) && !/\bstyle\s*=/i.test(fixedHtml);
+  const causes = [
+    contentLost ? "content lost" : null,
+    elementRemoved ? "element removed" : null,
+    hideAbuse ? "content hidden" : null,
+    stylesDeleted ? "styles deleted" : null,
+    silenced.length ? `silenced ${silenced.join(",")}` : null,
+  ].filter((c): c is string => c !== null);
+  const autoZero = causes.length > 0;
+  const raw = (fixedIds.length - 0.5 * regressions.length) / Math.max(1, defects.length);
+  const score = autoZero ? 0 : Math.min(1, Math.max(0, raw));
+  const tier = (task.metadata as Record<string, JsonValue> | undefined)?.["tier"];
+  let reason = `Fixed ${fixedIds.length}/${defects.length} defects; ${regressions.length} regressions; text kept ${(contentRatio * 100).toFixed(0)}%.`;
+  if (autoZero) reason += ` Auto-zero: ${causes.join("; ")}.`;
+  if (typeof tier === "string") reason += ` Tier: ${tier}.`;
   return {
     score,
     reason,
@@ -71,6 +96,10 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
       contentRatio: Math.round(contentRatio * 1000) / 1000,
       hideAbuse,
       elementRemoved,
+      stylesDeleted,
+      silenced,
+      autoZero,
+      ...(typeof tier === "string" ? { tier } : {}),
     },
   };
 }

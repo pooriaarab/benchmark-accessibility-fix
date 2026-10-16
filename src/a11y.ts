@@ -34,7 +34,7 @@ export interface CheckResult {
   // True when a failing element carries a checker-silencing gesture
   // (empty alt, empty aria-label, negating focus rule, lang="") rather
   // than an honest miss. The grader scores a silenced defect 0.
-  silenced?: boolean;
+  silenced: boolean;
 }
 
 export interface ElementCounts {
@@ -45,6 +45,8 @@ export interface ElementCounts {
   link: number;
   table: number;
   button: number;
+  heading: number;
+  control: number;
 }
 
 export interface Analysis {
@@ -89,8 +91,28 @@ export function extractHtml(answer: string): string {
   return blocks.sort((a, b) => b.length - a.length)[0] ?? answer;
 }
 
-
 // ---------- checks ----------
+
+function hasHandler(e: El, keys: string[]): boolean {
+  return Object.keys(e.attrs).some((k) => keys.includes(k));
+}
+
+const MOUSE_HANDLERS = ["onclick", "onmousedown", "onmouseup", "ontouchstart", "onpointerdown"];
+const KEY_HANDLERS = ["onkeydown", "onkeyup", "onkeypress"];
+
+const FOCUSABLE = new Set(["a", "area", "button", "input", "select", "textarea", "summary", "iframe", "audio", "video"]);
+const INTERACTIVE_ROLES = new Set(["button", "link", "switch", "checkbox", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "radio", "slider", "option", "combobox", "textbox", "searchbox", "spinbutton", "treeitem"]);
+const BUTTONISH = /^(cta|btn|button|submit|action)$/i;
+
+function isControl(e: El): boolean {
+  if (["button", "select", "textarea", "summary"].includes(e.tag)) return true;
+  if (e.tag === "a" || e.tag === "area") return e.attrs["href"] !== undefined;
+  if (e.tag === "input") return (e.attrs["type"] ?? "text").toLowerCase() !== "hidden";
+  if (INTERACTIVE_ROLES.has((e.attrs["role"] ?? "").toLowerCase())) return true;
+  if (hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS])) return true;
+  const ti = e.attrs["tabindex"];
+  return ti !== undefined && Number.isFinite(Number(ti.trim())) && Number(ti.trim()) >= 0;
+}
 
 function checkAlt(ctx: Ctx): CheckResult {
   const imgs = ctx.doc.els.filter((e) => e.tag === "img" && rendered(e, ctx));
@@ -196,44 +218,75 @@ function checkHeadings(ctx: Ctx): CheckResult {
   return { id: "heading-order", pass: true, targets: levels.length, silenced: false, detail: `order ${levels.join(">")} ok` };
 }
 
-function attr(tag: string, name: string): string | null {
-  const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
-  if (!m) return null;
-  return m[1] ?? m[2] ?? m[3] ?? null;
+function checkTabindex(ctx: Ctx): CheckResult {
+  const bad: string[] = [];
+  let silenced = false;
+  let seen = 0;
+  for (const e of ctx.doc.els) {
+    const raw = e.attrs["tabindex"];
+    if (raw === undefined) continue;
+    seen += 1;
+    const v = Number(raw.trim());
+    const focusable = FOCUSABLE.has(e.tag)
+      && !(e.tag === "a" && e.attrs["href"] === undefined)
+      && !(e.tag === "input" && (e.attrs["type"] ?? "").toLowerCase() === "hidden");
+    if (!Number.isFinite(v) || v > 0 || v < -1 || (v === -1 && focusable)) {
+      bad.push(raw.trim());
+      if (focusable && Number.isFinite(v) && v < 0) silenced = true;
+    }
+  }
+  return { id: "tabindex-positive", pass: bad.length === 0, targets: seen, silenced, detail: bad.length ? `bad tabindex ${bad.join(",")}` : "natural tab order" };
 }
 
-function styleTexts(html: string): string[] {
-  return [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1] ?? "");
+function checkDivButton(ctx: Ctx): CheckResult {
+  let bad = 0;
+  let silenced = false;
+  for (const e of ctx.doc.els) {
+    if (e.tag !== "div" && e.tag !== "span") continue;
+    if (!rendered(e, ctx)) continue;
+    const role = (e.attrs["role"] ?? "").toLowerCase();
+    const kb = hasHandler(e, KEY_HANDLERS);
+    const handler = hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS]);
+    const buttonish = (e.attrs["class"] ?? "").split(/\s+/).some((c) => BUTTONISH.test(c))
+      && e.children.some((c) => typeof c === "string" && c.trim() !== "");
+    const interactiveRole = INTERACTIVE_ROLES.has(role);
+    if (interactiveRole && kb) continue; // role plus keyboard support is a repair
+    if (handler || interactiveRole || buttonish) {
+      bad += 1;
+      if (!handler && !interactiveRole) silenced = true;
+    }
+  }
+  return { id: "div-button", pass: bad === 0, targets: bad, silenced, detail: bad ? `${bad} fake buttons` : "native controls" };
 }
 
-function checkTabindex(html: string): CheckResult {
-  const values = [...html.matchAll(/\btabindex\s*=\s*["']?\s*(-?\d+)/gi)].map((m) => Number(m[1]));
-  const bad = values.filter((v) => v > 0);
-  return { id: "tabindex-positive", pass: bad.length === 0, targets: values.length, detail: bad.length ? `positive order ${bad.join(",")}` : "natural tab order" };
+function checkLang(ctx: Ctx): CheckResult {
+  const html = ctx.doc.els.find((e) => e.tag === "html");
+  const lang = html?.attrs["lang"];
+  const pass = lang !== undefined && lang.trim() !== "";
+  const silenced = lang !== undefined && lang.trim() === "";
+  return { id: "missing-lang", pass, targets: html ? 1 : 0, silenced, detail: pass ? `lang="${lang?.trim()}"` : "html has no lang" };
 }
 
-function checkDivButton(html: string): CheckResult {
-  const tags = [...html.matchAll(/<(div|span)\b[^>]*>/gi)].map((m) => m[0]);
-  const bad = tags.filter((tag) => /\bonclick\b/i.test(tag) || /\brole\s*=\s*["']?\s*button/i.test(tag));
-  return { id: "div-button", pass: bad.length === 0, targets: tags.length, detail: bad.length ? `${bad.length} fake buttons` : "native controls" };
-}
+const NEGATING = /^(none|0|0px|0em|0rem|auto|medium|inherit|initial|unset)$/i;
+const INDICATOR_PROPS = /^(outline|outline-width|outline-style|outline-color|box-shadow|border|border-width|border-style|border-color|text-decoration|background|background-color|color)$/;
 
-function checkLang(html: string): CheckResult {
-  const tag = html.match(/<html\b[^>]*>/i)?.[0] ?? "";
-  const lang = attr(tag, "lang");
-  const pass = lang !== null && lang.trim() !== "";
-  return { id: "missing-lang", pass, targets: tag ? 1 : 0, detail: pass ? `lang="${lang?.trim()}"` : "html has no lang" };
-}
-
-function checkFocus(html: string): CheckResult {
-  const css = styleTexts(html).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules = [...css.matchAll(/([^{}]*:focus[^{}]*){([^}]*)}/gi)].map((m) => m[2] ?? "");
-  const visible = rules.some((body) =>
-    /outline\s*:\s*(?!none\b|0\b)/i.test(body) ||
-    /box-shadow\s*:\s*(?!none\b)/i.test(body) ||
-    /border\s*:\s*(?!none\b|0\b)/i.test(body),
-  );
-  return { id: "no-focus-style", pass: visible, targets: rules.length, detail: visible ? "visible focus indicator" : "no visible focus style" };
+function checkFocus(ctx: Ctx): CheckResult {
+  let ruleCount = 0;
+  let visible = 0;
+  for (const el of ctx.doc.els) {
+    if (el.styleText === null) continue;
+    const css = el.styleText.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of css.matchAll(/([^{}]*:focus[^{}]*){([^}]*)}/gi)) {
+      ruleCount += 1;
+      const shows = parseDecls(m[2] ?? "", 0).some((d) =>
+        INDICATOR_PROPS.test(d.prop) && d.value.split(/\s+/).some((tok) => !NEGATING.test(tok)));
+      if (shows) visible += 1;
+    }
+  }
+  return {
+    id: "no-focus-style", pass: visible > 0, targets: ruleCount, silenced: ruleCount > 0 && visible === 0,
+    detail: visible ? "visible focus indicator" : ruleCount ? "focus rules only remove indicators" : "no visible focus style",
+  };
 }
 
 function checkLinks(ctx: Ctx): CheckResult {
@@ -265,10 +318,6 @@ function checkTables(ctx: Ctx): CheckResult {
   return { id: "table-headers", pass: bad.length === 0, targets: tables.length, silenced: false, detail: bad.length ? `${bad.length}/${tables.length} tables lack headers` : `${tables.length} tables headed` };
 }
 
-function tagCount(html: string, name: string): number {
-  return [...html.matchAll(new RegExp(`<${name}(?=[\\s/>])`, "gi"))].length;
-}
-
 // ---------- public surface ----------
 
 export function visibleWords(html: string): string[] {
@@ -288,23 +337,31 @@ export function visibleWords(html: string): string[] {
   return text ? text.split(" ").filter(Boolean) : [];
 }
 
-
-
 export function analyze(html: string): Analysis {
-  const stripped = html.replace(/<!--[\s\S]*?-->/g, "");
-  const ctx = buildCtx(stripped);
+  const ctx = buildCtx(html);
+  const doc = ctx.doc;
+  const counts: ElementCounts = { img: 0, input: 0, select: 0, textarea: 0, link: 0, table: 0, button: 0, heading: 0, control: 0 };
+  for (const e of doc.els) {
+    if (!rendered(e, ctx)) continue;
+    if (e.tag === "img") counts.img += 1;
+    else if (e.tag === "input") counts.input += 1;
+    else if (e.tag === "select") counts.select += 1;
+    else if (e.tag === "textarea") counts.textarea += 1;
+    else if (e.tag === "a" && e.attrs["href"] !== undefined) counts.link += 1;
+    else if (e.tag === "table") counts.table += 1;
+    else if (e.tag === "button") counts.button += 1;
+    if (/^h[1-6]$/.test(e.tag) || (e.attrs["role"] ?? "").toLowerCase() === "heading") counts.heading += 1;
+    if (isControl(e)) counts.control += 1;
+  }
+  const hideCount = (html.replace(/<!--[\s\S]*?-->/g, "").match(/display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|aria-hidden\s*=\s*["']?true|\shidden(?=[\s=>/])|opacity\s*:\s*0(?![.\d])|font-size\s*:\s*0(?![.\d%])|text-indent\s*:\s*-\d|(?<![-\w])color\s*:\s*transparent/gi) ?? []).length;
   return {
     checks: [
       checkAlt(ctx), checkLabels(ctx), checkContrast(ctx), checkHeadings(ctx),
-      checkTabindex(stripped), checkDivButton(stripped), checkLang(stripped), checkFocus(stripped),
+      checkTabindex(ctx), checkDivButton(ctx), checkLang(ctx), checkFocus(ctx),
       checkLinks(ctx), checkTables(ctx),
     ],
-    words: visibleWords(stripped),
-    counts: {
-      img: tagCount(stripped, "img"), input: tagCount(stripped, "input"), select: tagCount(stripped, "select"),
-      textarea: tagCount(stripped, "textarea"), link: tagCount(stripped, "a"),
-      table: tagCount(stripped, "table"), button: tagCount(stripped, "button"),
-    },
-    hideCount: (stripped.match(/display\s*:\s*none|visibility\s*:\s*hidden|aria-hidden\s*=\s*["']?true/gi) ?? []).length,
+    words: visibleWords(html),
+    counts,
+    hideCount,
   };
 }
