@@ -8,6 +8,7 @@ authors:
 version: "0.1.0"
 date-released: 2026-10-16
 license: MIT
+doi: 10.5281/zenodo.23422402
 repository-code: https://github.com/pooriaarab/benchmark-accessibility-fix
 url: "https://aibenchmarkindex.com/benchmarks/benchmark-accessibility-fix"
 abstract: "Benchmark for accessible HTML fixes: alt text, labels, contrast, keyboard support."
