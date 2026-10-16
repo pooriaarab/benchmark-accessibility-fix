@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { defineBenchmark, type Benchmark, type BenchmarkDefinition, type JsonValue, type Task, type Trace } from "benchmark-core";
-import { analyze, CHECK_IDS, extractHtml, NEEDS_TARGETS, type CheckId } from "./a11y.js";
+import { analyze, buildCtx, CHECK_IDS, extractHtml, NEEDS_TARGETS, type CheckId } from "./a11y.js";
 
 export async function loadTasksFrom(path: string | URL): Promise<Task[]> {
   const text = await readFile(path, "utf8");
@@ -71,9 +71,12 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
     return stillFails && check !== undefined && check.silenced;
   });
   // Dropping every stylesheet and every inline style deletes the page's
-  // styling outright; contrast passing by default is not a repair.
-  const hadStyle = /<style[\s>]/i.test(brokenHtml) || /\bstyle\s*=/i.test(brokenHtml);
-  const stylesDeleted = hadStyle && !/<style[\s>]/i.test(fixedHtml) && !/\bstyle\s*=/i.test(fixedHtml);
+  // styling outright; contrast passing by default is not a repair. The
+  // test runs on the parsed document so a `<style>` inside an HTML
+  // comment or the text `style=` in prose does not count as styling.
+  const hasStyles = (html: string): boolean =>
+    buildCtx(html).doc.els.some((e) => e.tag === "style" || e.attrs["style"] !== undefined);
+  const stylesDeleted = hasStyles(brokenHtml) && !hasStyles(fixedHtml);
   const causes = [
     contentLost ? "content lost" : null,
     elementRemoved ? "element removed" : null,

@@ -101,3 +101,12 @@ The analyzer is static: it cannot run layout, zoom, or assistive
 technology, and pseudo-state styling (`:hover`, `:active`, focus styles
 beyond the dedicated check) is not exercised. Real user testing still
 matters.
+
+Concealment that keeps the element in the parsed render is not a hiding
+signal: `clip-path: inset(100%)`, `transform: scale(0)`, `height: 0`
+with `overflow: hidden`, `font-size: 1px`, and off-screen positioning
+(`position: absolute; left: -9999px`) change no check result, so a
+correct fix using them still scores 1 and a broken page stays 0. That is
+deliberate - the same declarations are the standard `sr-only` pattern -
+but it is a visible-information limit, not a guarantee that the page
+looks repaired. The E2E gate pins both directions.
