@@ -32,11 +32,18 @@ reference fix and half with garbage, so a 50% mock score means the grader
 sees both outcomes. The table above is excerpted from a real mock run.
 
 The 40 public tasks are synthetic fixtures built by
-`scripts/gen-tasks.mjs` (seed 20261015). Each page carries two to four
-seeded defects: missing alt text, unlabeled inputs, low contrast, broken
-heading order, positive `tabindex`, a `div` used as a button, a missing
-`lang` attribute, no visible focus style, an empty link, or a table
-without headers.
+`scripts/gen-tasks.mjs` (seed 20261015). Page text, section order, class
+names, and colors are randomized per seed, so no two tasks share a page.
+`easy` tasks carry two or three defects on a single-column article
+skeleton; `hard` tasks carry four or five on a different skeleton —
+grouped fields named by `aria-labelledby` chains, a `role="tablist"`
+widget, a table with spanning headers — where defects also cut name
+chains, trap Tab in a key handler, nest a control inside a link, or wrap
+a widget in `aria-hidden`. Defect kinds: missing alt text, unlabeled
+inputs, low contrast, broken heading order, bent tab order, a `div` used
+as a button, a missing `lang` attribute, no visible focus style, an
+empty link, or a table without headers. A separately seeded hidden split
+uses `a11yh-` ids and never enters git.
 
 ## Install
 
@@ -88,7 +95,11 @@ used to pass, deleted text or removed elements, and newly hidden content
 (`display: none`, `visibility: hidden`, `aria-hidden`). The per-task
 `details` object reports `defectsFixed`, `regressions`, and
 `contentLost` separately, so a low score tells you which behavior broke.
-The report mean comes with a bootstrap 95% confidence interval.
+The report mean comes with a bootstrap 95% confidence interval. `run` and
+`score` print a per-tier table (solved n/N, defects fixed, regressions,
+content lost per tier) after the task table, and `--json` adds a
+`details` object to every row plus a `tiers` summary; the SDK `run()`
+and the MCP `run_benchmark` result carry the same fields.
 
 There is no public leaderboard yet. Until real models are run and
 published, the only reference number is the mock's 50%.
@@ -186,14 +197,41 @@ comparisons uses another seed and stays out of git and npm:
 node scripts/gen-tasks.mjs --seed 999 --split hidden --out artifacts/tasks.hidden.jsonl
 ```
 
+Every surface accepts an alternate task file, so a hidden split runs the
+same way as the public one:
+
+- CLI: `--tasks <path>` on any command, for example
+  `benchmark-accessibility-fix run --model offline --provider mock --tasks artifacts/tasks.hidden.jsonl`.
+  Any readable JSONL path works.
+- SDK: `run(adapter, { tasksPath })` or `score(id, submission, { tasksPath })`.
+  Each call builds a fresh benchmark object, so alternating paths in one
+  process never shares a cached task list.
+- HTTP API: `?tasks=<path>` on any route, or a `"tasksPath"` field in the
+  `POST /v1/score` body. The path must land inside the package or in a
+  directory named by the `A11Y_TASK_DIRS` environment allow-list
+  (colon-separated); anything else gets a 403.
+- MCP: set `A11Y_TASKS` to the file path before starting the server, or
+  pass `--tasks` to the `mcp` command.
+
+The generator ships in the npm package (`scripts/gen-tasks.mjs`), so
+`npx` users can build a split without cloning the repo. It contains no
+private seed - pick your own.
+
 ## Limits
 
-The static analyzer cannot run layout, zoom, or assistive technology,
-and it reads only hex and common named colors for contrast. Fixtures
-are small synthetic pages, not production sites. Public tasks can enter
-training data, so keep a separately seeded hidden split for final
-comparisons. Remote providers can add cost and retain prompts under
-their own policies.
+The static analyzer cannot run layout, zoom, or assistive technology.
+Contrast resolves hex, `rgb()`, `hsl()`, the full named-color list,
+`var()` custom properties, and `inherit` through a small cascade.
+Concealment that leaves the element in the parsed render — `clip-path`,
+`transform: scale(0)`, zero height, `font-size: 1px`, off-screen
+positioning — is neither rewarded nor penalized today (the same
+machinery powers the legitimate `.sr-only` pattern); the E2E gate pins
+that policy. Hard tasks share one generator family, so a fixer written
+against it would clear the tier; the benchmark claims difficulty against
+unseen structure, not template-proofness. Fixtures are small synthetic
+pages, not production sites. Public tasks can enter training data, so
+keep a separately seeded hidden split for final comparisons. Remote
+providers can add cost and retain prompts under their own policies.
 
 ## Integration guides
 
@@ -249,9 +287,9 @@ and a grader that verifies the repair instead of trusting the model.
 
 ### Can I use a hidden split?
 
-Yes. Generate one with another seed, keep the file outside git and the
-npm package, and score against the same grader. The public seed is
-20261015.
+Yes. Generate one with another seed, keep the file outside git, and run
+or score against it with `--tasks` / `tasksPath` on any surface. The
+public seed is 20261015.
 
 ## License
 

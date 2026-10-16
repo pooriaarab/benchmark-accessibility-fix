@@ -1,7 +1,15 @@
 // Dependency-free static accessibility analyzer for single-document fixes.
-// No browser, no axe-core, no network. Regular expressions only. The
-// supported color formats are #rgb, #rrggbb, and a small named-color list;
-// anything else cannot be verified and fails the contrast check.
+// The render engine (light DOM + small CSS cascade) lives in a11y-dom.ts;
+// this file holds the ten WCAG checks and the analysis rollup. Comments are
+// stripped by the parser, so commented-out markup cannot fail a check and
+// commented-out rules cannot pass one.
+
+import {
+  ancestors, bgColorToken, cascadeNumber, decode, elText, matchSelector, over,
+  parseDecls, parseDoc, parseNumericColor, parseSelector, ratioOf, RAW_TEXT,
+  rendered, resolveColor, resolveColorString, styleRules,
+  type Ctx, type Decl, type El, type Rgba,
+} from "./a11y-dom.js";
 
 export const CHECK_IDS = [
   "missing-alt", "unlabeled-input", "low-contrast", "heading-order",
@@ -24,6 +32,10 @@ export interface CheckResult {
   pass: boolean;
   targets: number;
   detail: string;
+  // True when a failing element carries a checker-silencing gesture
+  // (empty alt, empty aria-label, negating focus rule, lang="") rather
+  // than an honest miss. The grader scores a silenced defect 0.
+  silenced: boolean;
 }
 
 export interface ElementCounts {
@@ -34,49 +46,45 @@ export interface ElementCounts {
   link: number;
   table: number;
   button: number;
+  heading: number;
+  control: number;
 }
 
 export interface Analysis {
   checks: CheckResult[];
   words: string[];
   counts: ElementCounts;
-  hideCount: number;
+  // Sorted keys of the elements carrying a hide signal. Compared
+  // element-wise (not by count) so a fix cannot trade one hidden
+  // element for another.
+  hidden: string[];
 }
 
-const NAMED: Record<string, string> = {
-  white: "#ffffff", black: "#000000", red: "#ff0000", lime: "#00ff00",
-  blue: "#0000ff", yellow: "#ffff00", cyan: "#00ffff", aqua: "#00ffff",
-  magenta: "#ff00ff", fuchsia: "#ff00ff", gray: "#808080", grey: "#808080",
-  green: "#008000", maroon: "#800000", navy: "#000080", olive: "#808000",
-  purple: "#800080", silver: "#c0c0c0", teal: "#008080",
-};
-
-function parseColor(token: string): string | null {
-  const t = token.trim().toLowerCase();
-  if (NAMED[t]) return NAMED[t];
-  const m = t.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
-  if (!m) return null;
-  let h = m[1] ?? "";
-  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
-  return `#${h}`;
-}
-
-function channel(hex: string, at: number): number {
-  const c = parseInt(hex.slice(at, at + 2), 16) / 255;
-  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
-
-function luminance(hex: string): number {
-  return 0.2126 * channel(hex, 1) + 0.7152 * channel(hex, 3) + 0.0722 * channel(hex, 5);
-}
 
 export function contrastRatio(fg: string, bg: string): number | null {
-  const a = parseColor(fg);
-  const b = parseColor(bg);
+  const a = parseNumericColor(fg);
+  const b = parseNumericColor(bg);
   if (!a || !b) return null;
-  const la = luminance(a);
-  const lb = luminance(b);
-  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  return ratioOf(a, b);
+}
+
+// One context per analyzed document: parse once, collect stylesheet rules,
+// share memo tables across every check.
+export function buildCtx(html: string): Ctx {
+  const doc = parseDoc(html);
+  return { doc, rules: styleRules(doc), colorMemo: new Map(), customMemo: new Map(), numMemo: new Map(), renderMemo: new Map() };
+}
+
+export function textEls(ctx: Ctx): El[] {
+  const hasBody = ctx.doc.els.some((e) => e.tag === "body");
+  return ctx.doc.els.filter((e) => {
+    if (!e.children.some((c) => typeof c === "string" && c.trim() !== "")) return false;
+    if (RAW_TEXT.has(e.tag)) return false;
+    const up = ancestors(e);
+    if (hasBody && !up.some((a) => a.tag === "body") && e.tag !== "body") return false;
+    if (up.some((a) => ["head", "template", "textarea"].includes(a.tag))) return false;
+    return rendered(e, ctx);
+  });
 }
 
 // Take the largest fenced block when the model wraps its answer, else the
@@ -87,199 +95,531 @@ export function extractHtml(answer: string): string {
   return blocks.sort((a, b) => b.length - a.length)[0] ?? answer;
 }
 
-function styleTexts(html: string): string[] {
-  return [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1] ?? "");
+// ---------- checks ----------
+
+function hasHandler(e: El, keys: string[]): boolean {
+  return Object.keys(e.attrs).some((k) => keys.includes(k));
 }
 
-interface Pair {
-  fg: string;
-  bg: string;
-  where: string;
+const MOUSE_HANDLERS = ["onclick", "onmousedown", "onmouseup", "ontouchstart", "onpointerdown"];
+const KEY_HANDLERS = ["onkeydown", "onkeyup", "onkeypress"];
+
+const FOCUSABLE = new Set(["a", "area", "button", "input", "select", "textarea", "summary", "iframe", "audio", "video"]);
+const INTERACTIVE_ROLES = new Set(["button", "link", "switch", "checkbox", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "radio", "slider", "option", "combobox", "textbox", "searchbox", "spinbutton", "treeitem"]);
+const BUTTONISH = /^(cta|btn|button|submit|action)$/i;
+
+function isControl(e: El): boolean {
+  if (["button", "select", "textarea", "summary"].includes(e.tag)) return true;
+  if (e.tag === "a" || e.tag === "area") return e.attrs["href"] !== undefined;
+  if (e.tag === "input") return (e.attrs["type"] ?? "text").toLowerCase() !== "hidden";
+  if (INTERACTIVE_ROLES.has((e.attrs["role"] ?? "").toLowerCase())) return true;
+  if (hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS])) return true;
+  const ti = e.attrs["tabindex"];
+  return ti !== undefined && Number.isFinite(Number(ti.trim())) && Number(ti.trim()) >= 0;
 }
 
-function declPairs(decls: string, where: string, out: Pair[]): void {
-  let fg: string | null = null;
-  let bg: string | null = null;
-  let seen = false;
-  for (const part of decls.split(";")) {
-    const m = part.match(/^\s*(color|background-color|background)\s*:\s*(.+?)\s*$/i);
-    if (!m) continue;
-    seen = true;
-    const value = m[2] ?? "";
-    if ((m[1] ?? "").toLowerCase() === "color") {
-      fg = value.split(/\s+/)[0] ?? null;
-    } else {
-      bg = value.match(/#[0-9a-f]{3,6}\b/i)?.[0] ?? value.split(/\s+/).pop() ?? null;
-    }
-  }
-  if (seen) out.push({ fg: fg ?? "#000000", bg: bg ?? "#ffffff", where });
-}
-
-function contrastPairs(html: string): Pair[] {
-  const pairs: Pair[] = [];
-  for (const css of styleTexts(html)) {
-    const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
-    for (const rule of noComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      declPairs(rule[2] ?? "", (rule[1] ?? "").trim().slice(0, 40), pairs);
-    }
-  }
-  for (const attr of html.matchAll(/\bstyle\s*=\s*(["'])(.*?)\1/gis)) {
-    declPairs(attr[2] ?? "", "inline", pairs);
-  }
-  return pairs;
-}
-
-function attr(tag: string, name: string): string | null {
-  const m = tag.match(new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
-  if (!m) return null;
-  return m[1] ?? m[2] ?? m[3] ?? null;
-}
-
-function innerText(html: string): string {
-  return html
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-export function visibleWords(html: string): string[] {
-  const text = innerText(html).toLowerCase();
-  return text ? text.split(" ") : [];
-}
-
-function tagCount(html: string, name: string): number {
-  return [...html.matchAll(new RegExp(`<${name}(?=[\\s/>])`, "gi"))].length;
-}
-
-function checkAlt(html: string): CheckResult {
-  const imgs = [...html.matchAll(/<img\b[^>]*>/gi)].map((m) => m[0]);
-  const bad = imgs.filter((tag) => {
-    const alt = attr(tag, "alt");
-    return alt === null || alt.trim() === "";
-  });
-  return { id: "missing-alt", pass: bad.length === 0, targets: imgs.length, detail: bad.length ? `${bad.length}/${imgs.length} images lack text` : `${imgs.length} images labelled` };
+function checkAlt(ctx: Ctx): CheckResult {
+  const imgs = ctx.doc.els.filter((e) => e.tag === "img" && rendered(e, ctx));
+  const bad = imgs.filter((e) => (e.attrs["alt"] ?? "").trim() === "");
+  const silenced = bad.some((e) =>
+    e.attrs["alt"] !== undefined
+    || ["presentation", "none"].includes((e.attrs["role"] ?? "").toLowerCase())
+    || (e.attrs["aria-hidden"] ?? "").toLowerCase() === "true");
+  return { id: "missing-alt", pass: bad.length === 0, targets: imgs.length, silenced, detail: bad.length ? `${bad.length}/${imgs.length} images lack text` : `${imgs.length} images labelled` };
 }
 
 const SKIPPABLE_INPUT = new Set(["hidden", "submit", "button", "reset", "image"]);
 
-function checkLabels(html: string): CheckResult {
-  const fields = [...html.matchAll(/<(input|select|textarea)\b[^>]*>/gi)].map((m) => m[0]);
-  const labelled = fields.filter((tag) => SKIPPABLE_INPUT.has((attr(tag, "type") ?? "").toLowerCase()));
-  const needing = fields.filter((tag) => !SKIPPABLE_INPUT.has((attr(tag, "type") ?? "").toLowerCase()));
-  void labelled;
-  const forIds = new Set(
-    [...html.matchAll(/<label\b[^>]*\bfor\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].map((m) => m[1] ?? m[2] ?? m[3]),
-  );
-  const wrapped = [...html.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/gi)].map((m) => m[0]);
-  const bad = needing.filter((tag) => {
-    if ((attr(tag, "aria-label") ?? "").trim() !== "") return false;
-    if ((attr(tag, "aria-labelledby") ?? "").trim() !== "") return false;
-    const id = attr(tag, "id");
-    if (id && forIds.has(id)) return false;
-    const index = html.indexOf(tag);
-    if (wrapped.some((region) => {
-      const at = html.indexOf(region);
-      return index >= at && index < at + region.length;
-    })) return false;
+const ID_LOOKUP = new WeakMap<Ctx, Map<string, El>>();
+function byId(ctx: Ctx): Map<string, El> {
+  let map = ID_LOOKUP.get(ctx);
+  if (map === undefined) {
+    map = new Map();
+    for (const el of ctx.doc.els) {
+      const id = el.attrs["id"];
+      if (id !== undefined && !map.has(id)) map.set(id, el);
+    }
+    ID_LOOKUP.set(ctx, map);
+  }
+  return map;
+}
+
+// Resolve an aria-labelledby chain to its name. Every id must point at a
+// rendered element and the concatenated text must be non-empty; a dangling
+// or empty reference yields no name even when the element also carries an
+// aria-label or a real label (labelledby wins in the accName order).
+function labelledByName(e: El, ctx: Ctx): { ok: boolean; quieting: boolean } | null {
+  const raw = e.attrs["aria-labelledby"];
+  if (raw === undefined) return null;
+  const ids = raw.trim().split(/\s+/).filter(Boolean);
+  if (ids.length === 0) return { ok: false, quieting: true };
+  let text = "";
+  let quieting = false;
+  for (const id of ids) {
+    const target = byId(ctx).get(id);
+    if (target === undefined || !rendered(target, ctx) || elText(target).trim() === "") quieting = true;
+    else text += elText(target);
+  }
+  return { ok: !quieting && text.trim() !== "", quieting };
+}
+
+function checkLabels(ctx: Ctx): CheckResult {
+  const fields = ctx.doc.els.filter((e) => ["input", "select", "textarea"].includes(e.tag) && rendered(e, ctx));
+  const needing = fields.filter((e) => !SKIPPABLE_INPUT.has((e.attrs["type"] ?? "text").toLowerCase()));
+  const labelFor = new Map<string, El>();
+  for (const e of ctx.doc.els) if (e.tag === "label" && e.attrs["for"]) labelFor.set(e.attrs["for"] ?? "", e);
+  let silenced = false;
+  const bad = needing.filter((e) => {
+    const al = e.attrs["aria-label"];
+    if (al !== undefined && al.trim() === "") silenced = true;
+    const named = labelledByName(e, ctx);
+    if (named !== null) {
+      if (named.ok) return false;
+      if (named.quieting) silenced = true;
+      return true;
+    }
+    if ((al ?? "").trim() !== "") return false;
+    const lab = e.attrs["id"] !== undefined ? labelFor.get(e.attrs["id"] ?? "") : undefined;
+    if (lab !== undefined) {
+      if (elText(lab).trim() !== "") return false;
+      silenced = true;
+    }
+    const wrap = ancestors(e).find((a) => a.tag === "label");
+    if (wrap !== undefined && elText(wrap).trim() !== "") return false;
+    if (wrap !== undefined) silenced = true;
     return true;
   });
-  return { id: "unlabeled-input", pass: bad.length === 0, targets: needing.length, detail: bad.length ? `${bad.length}/${needing.length} fields unlabeled` : `${needing.length} fields labelled` };
+  return { id: "unlabeled-input", pass: bad.length === 0, targets: needing.length, silenced, detail: bad.length ? `${bad.length}/${needing.length} fields unlabeled` : `${needing.length} fields labelled` };
 }
 
-function checkContrast(html: string): CheckResult {
-  const pairs = contrastPairs(html);
-  const bad = pairs.filter((p) => {
-    const r = contrastRatio(p.fg, p.bg);
-    return r === null || r < 4.5;
-  });
-  const worst = pairs.map((p) => contrastRatio(p.fg, p.bg)).filter((r): r is number => r !== null);
-  const min = worst.length ? Math.min(...worst).toFixed(2) : "n/a";
-  return { id: "low-contrast", pass: bad.length === 0, targets: pairs.length, detail: bad.length ? `${bad.length}/${pairs.length} pairs below 4.5:1` : `${pairs.length} pairs reach 4.5:1 (min ${min}:1)` };
+// Effective backdrop under an element: ancestor background layers
+// composited until opaque, white at the root.
+function effectiveBackground(el: El, ctx: Ctx): Rgba | "unresolvable" {
+  const layers: Rgba[] = [];
+  let cur: El | null = el;
+  while (cur && cur.tag !== "#root") {
+    const b = resolveColor(cur, "background-color", ctx, 0);
+    if (b === "unresolvable") return "unresolvable";
+    if (b !== "transparent") layers.push(b);
+    if (layers.length > 0 && (layers[layers.length - 1]?.a ?? 1) >= 1) break;
+    cur = cur.parent;
+  }
+  let bg: Rgba = { r: 255, g: 255, b: 255, a: 1 };
+  for (const l of [...layers].reverse()) bg = over(l, bg);
+  return bg;
 }
 
-function checkHeadings(html: string): CheckResult {
-  const levels = [...html.matchAll(/<h([1-6])\b[^>]*>/gi)].map((m) => Number(m[1] ?? "0"));
-  if (levels.length === 0) return { id: "heading-order", pass: false, targets: 0, detail: "no headings" };
-  if (levels[0] !== 1) return { id: "heading-order", pass: false, targets: levels.length, detail: "first heading is not h1" };
-  if (levels.filter((l) => l === 1).length !== 1) return { id: "heading-order", pass: false, targets: levels.length, detail: "more than one h1" };
+function sameColor(a: Rgba, b: Rgba): boolean {
+  return Math.abs(a.r - b.r) < 2 && Math.abs(a.g - b.g) < 2 && Math.abs(a.b - b.b) < 2 && Math.abs(a.a - b.a) < 0.02;
+}
+
+function checkContrast(ctx: Ctx): CheckResult {
+  const targets = textEls(ctx);
+  let bad = 0;
+  let min = Infinity;
+  for (const el of targets) {
+    const fg = resolveColor(el, "color", ctx, 0);
+    if (fg === "unresolvable" || fg === "transparent") { bad += 1; continue; }
+    const backdrop = effectiveBackground(el, ctx);
+    if (backdrop === "unresolvable") { bad += 1; continue; }
+    const bg = backdrop;
+    const ink = over(fg, bg);
+    const size = cascadeNumber(el, "font-size", ctx, 0);
+    const weight = cascadeNumber(el, "font-weight", ctx, 0);
+    // WCAG 1.4.3: 4.5:1 for normal text, 3:1 for large text
+    // (>= 24px, or >= 18.66px when bold).
+    const need = size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5;
+    const r = ratioOf(ink, bg);
+    if (r < min) min = r;
+    if (r < need) bad += 1;
+  }
+  const pass = bad === 0;
+  const minText = Number.isFinite(min) ? ` (min ${min.toFixed(2)}:1)` : "";
+  return {
+    id: "low-contrast", pass, targets: targets.length, silenced: false,
+    detail: bad ? `${bad}/${targets.length} text elements below threshold` : `${targets.length} text elements pass${minText}`,
+  };
+}
+
+function headingLevels(ctx: Ctx): number[] {
+  const out: number[] = [];
+  for (const e of ctx.doc.els) {
+    if (!rendered(e, ctx)) continue;
+    const hm = e.tag.match(/^h([1-6])$/);
+    if (hm) { out.push(Number(hm[1])); continue; }
+    if ((e.attrs["role"] ?? "").toLowerCase() === "heading") {
+      const lv = Number(e.attrs["aria-level"] ?? "2");
+      out.push(lv >= 1 && lv <= 6 ? Math.floor(lv) : 2);
+    }
+  }
+  return out;
+}
+
+function checkHeadings(ctx: Ctx): CheckResult {
+  const levels = headingLevels(ctx);
+  const fail = (detail: string): CheckResult => ({ id: "heading-order", pass: false, targets: levels.length, silenced: false, detail });
+  if (levels.length === 0) return fail("no headings");
+  if (levels[0] !== 1) return fail("first heading is not h1");
+  if (levels.filter((l) => l === 1).length !== 1) return fail("more than one h1");
   for (let i = 1; i < levels.length; i++) {
     const prev = levels[i - 1] ?? 1;
     const cur = levels[i] ?? 1;
-    if (cur > prev + 1) {
-      return { id: "heading-order", pass: false, targets: levels.length, detail: `h${prev} jumps to h${cur}` };
+    if (cur > prev + 1) return fail(`h${prev} jumps to h${cur}`);
+  }
+  return { id: "heading-order", pass: true, targets: levels.length, silenced: false, detail: `order ${levels.join(">")} ok` };
+}
+
+// A keyboard trap swallows keys without acting on them: an unconditional
+// preventDefault/return false, or one guarded only by a Tab test. A
+// handler that cancels a named non-Tab key (Space scroll, Enter) is a
+// normal repair and does not count.
+const TRAP_CANCEL = /preventdefault|return\s+false/i;
+const TRAP_KEY = /key|which|keycode|charcode|\bcode\b/i;
+const TRAP_TAB = /["']tab["']|keycode\s*={0,3}\s*9\b|which\s*={0,3}\s*9\b/i;
+function trapsKeys(e: El): boolean {
+  for (const k of KEY_HANDLERS) {
+    const v = e.attrs[k];
+    if (v !== undefined && TRAP_CANCEL.test(v) && (!TRAP_KEY.test(v) || TRAP_TAB.test(v))) return true;
+  }
+  return false;
+}
+
+function checkTabindex(ctx: Ctx): CheckResult {
+  const bad: string[] = [];
+  let silenced = false;
+  let seen = 0;
+  for (const e of ctx.doc.els) {
+    const raw = e.attrs["tabindex"];
+    if (raw !== undefined) {
+      seen += 1;
+      const v = Number(raw.trim());
+      const focusable = FOCUSABLE.has(e.tag)
+        && !(e.tag === "a" && e.attrs["href"] === undefined)
+        && !(e.tag === "input" && (e.attrs["type"] ?? "").toLowerCase() === "hidden");
+      if (!Number.isFinite(v) || v > 0 || v < -1 || (v === -1 && focusable)) {
+        bad.push(raw.trim());
+        if (focusable && Number.isFinite(v) && v < 0) silenced = true;
+      }
+    }
+    if (rendered(e, ctx) && isControl(e) && trapsKeys(e)) {
+      bad.push("key trap");
+      silenced = true;
     }
   }
-  return { id: "heading-order", pass: true, targets: levels.length, detail: `order ${levels.join(">")} ok` };
+  return { id: "tabindex-positive", pass: bad.length === 0, targets: seen, silenced, detail: bad.length ? `bad tab order ${bad.join(",")}` : "natural tab order" };
 }
 
-function checkTabindex(html: string): CheckResult {
-  const values = [...html.matchAll(/\btabindex\s*=\s*["']?\s*(-?\d+)/gi)].map((m) => Number(m[1]));
-  const bad = values.filter((v) => v > 0);
-  return { id: "tabindex-positive", pass: bad.length === 0, targets: values.length, detail: bad.length ? `positive order ${bad.join(",")}` : "natural tab order" };
+function checkDivButton(ctx: Ctx): CheckResult {
+  let bad = 0;
+  let silenced = false;
+  for (const e of ctx.doc.els) {
+    if (!rendered(e, ctx)) continue;
+    // A control nested inside a link or button, or placed inside an
+    // aria-hidden subtree, is unreachable by keyboard or AT even when
+    // the element itself looks repaired.
+    if (isControl(e)) {
+      const up = ancestors(e);
+      if (up.some((a) => (a.tag === "a" && a.attrs["href"] !== undefined) || a.tag === "button")) {
+        bad += 1;
+        continue;
+      }
+      if (up.some((a) => (a.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true")
+        || (e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") {
+        bad += 1;
+        silenced = true;
+        continue;
+      }
+    }
+    // Native widgets carry their own focus and key behavior. Every
+    // other element - a `p` with role="button" fails the same way a
+    // `div` does - must prove keyboard support to count as repaired.
+    const nativeWidget = FOCUSABLE.has(e.tag)
+      && !(["a", "area"].includes(e.tag) && e.attrs["href"] === undefined)
+      && !(e.tag === "input" && (e.attrs["type"] ?? "text").toLowerCase() === "hidden");
+    if (nativeWidget) continue;
+    const role = (e.attrs["role"] ?? "").toLowerCase();
+    const kb = hasHandler(e, KEY_HANDLERS);
+    const handler = hasHandler(e, [...MOUSE_HANDLERS, ...KEY_HANDLERS]);
+    const buttonish = (e.attrs["class"] ?? "").split(/\s+/).some((c) => BUTTONISH.test(c))
+      && e.children.some((c) => typeof c === "string" && c.trim() !== "");
+    const interactiveRole = INTERACTIVE_ROLES.has(role);
+    // Role plus keyboard support is a repair only when the element can
+    // actually take focus: a non-negative tabindex, like a native
+    // control. The attribute must be a valid integer - browsers ignore
+    // "" and "1.5", which leave the element unfocusable.
+    const ti = e.attrs["tabindex"];
+    const tabOk = ti !== undefined && /^-?\d+$/.test(ti.trim()) && Number(ti.trim()) >= 0;
+    if (interactiveRole && kb && tabOk) continue;
+    if (handler || interactiveRole || buttonish) {
+      bad += 1;
+      if (!handler && !interactiveRole) silenced = true;
+    }
+  }
+  return { id: "div-button", pass: bad === 0, targets: bad, silenced, detail: bad ? `${bad} fake buttons` : "native controls" };
 }
 
-function checkDivButton(html: string): CheckResult {
-  const tags = [...html.matchAll(/<(div|span)\b[^>]*>/gi)].map((m) => m[0]);
-  const bad = tags.filter((tag) => /\bonclick\b/i.test(tag) || /\brole\s*=\s*["']?\s*button/i.test(tag));
-  return { id: "div-button", pass: bad.length === 0, targets: tags.length, detail: bad.length ? `${bad.length} fake buttons` : "native controls" };
+function checkLang(ctx: Ctx): CheckResult {
+  const html = ctx.doc.els.find((e) => e.tag === "html");
+  const lang = html?.attrs["lang"];
+  const pass = lang !== undefined && lang.trim() !== "";
+  const silenced = lang !== undefined && lang.trim() === "";
+  return { id: "missing-lang", pass, targets: html ? 1 : 0, silenced, detail: pass ? `lang="${lang?.trim()}"` : "html has no lang" };
 }
 
-function checkLang(html: string): CheckResult {
-  const tag = html.match(/<html\b[^>]*>/i)?.[0] ?? "";
-  const lang = attr(tag, "lang");
-  const pass = lang !== null && lang.trim() !== "";
-  return { id: "missing-lang", pass, targets: tag ? 1 : 0, detail: pass ? `lang="${lang?.trim()}"` : "html has no lang" };
+const NEGATING = /^(none|0|0px|0em|0rem|auto|medium|inherit|initial|unset)$/i;
+const INDICATOR_PROPS = /^(outline|outline-width|outline-style|outline-color|box-shadow|border|border-width|border-style|border-color|text-decoration|background|background-color|color)$/;
+// Props whose value is a single color the rule paints with.
+const COLOR_PROPS = new Set(["color", "background-color", "outline-color", "border-color"]);
+// Shorthands that paint with an explicit color: when every color token in
+// the value is invisible (transparent or the backdrop itself), the
+// indicator is invisible too.
+const PAINT_PROPS = new Set(["outline", "border", "box-shadow", "text-decoration"]);
+const FOCUS_STATE = /:focus(?:-visible|-within)?\b/;
+
+// Drop every pseudo-class/element so the selector can be matched against
+// the base render; a bare ":focus" becomes the universal selector.
+// Bracket-aware so attribute values containing colons survive.
+function focusBase(sel: string): string {
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < sel.length; i += 1) {
+    const ch = sel[i] ?? "";
+    if (ch === "[") depth += 1;
+    else if (ch === "]") depth -= 1;
+    else if (ch === ":" && depth === 0) {
+      let j = i + 1;
+      if (sel[j] === ":") j += 1;
+      while (j < sel.length && /[\w-]/.test(sel[j] ?? "")) j += 1;
+      if (sel[j] === "(") {
+        let inner = 0;
+        while (j < sel.length) {
+          if (sel[j] === "(") inner += 1;
+          if (sel[j] === ")") inner -= 1;
+          j += 1;
+          if (inner <= 0) break;
+        }
+      }
+      i = j - 1;
+      continue;
+    }
+    out += ch;
+  }
+  const base = out.trim();
+  return base === "" || base === "*" ? "*" : base;
 }
 
-function checkFocus(html: string): CheckResult {
-  const css = styleTexts(html).join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
-  const rules = [...css.matchAll(/([^{}]*:focus[^{}]*){([^}]*)}/gi)].map((m) => m[2] ?? "");
-  const visible = rules.some((body) =>
-    /outline\s*:\s*(?!none\b|0\b)/i.test(body) ||
-    /box-shadow\s*:\s*(?!none\b)/i.test(body) ||
-    /border\s*:\s*(?!none\b|0\b)/i.test(body),
-  );
-  return { id: "no-focus-style", pass: visible, targets: rules.length, detail: visible ? "visible focus indicator" : "no visible focus style" };
+function hasControlInside(el: El, ctx: Ctx, depth: number): boolean {
+  if (depth > 24) return false;
+  for (const c of el.children) {
+    if (typeof c === "string") continue;
+    if (rendered(c, ctx) && (isControl(c) || hasControlInside(c, ctx, depth + 1))) return true;
+  }
+  return false;
 }
 
-function checkLinks(html: string): CheckResult {
-  const links = [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)];
-  const bad = links.filter((m) => {
-    const opening = m[1] ?? "";
-    if ((attr(opening, "aria-label") ?? "").trim() !== "") return false;
-    if ((attr(opening, "aria-labelledby") ?? "").trim() !== "") return false;
-    const inner = m[2] ?? "";
-    if (innerText(inner).trim() !== "") return false;
-    const imgAlt = [...inner.matchAll(/<img\b[^>]*>/gi)]
-      .map((im) => attr(im[0], "alt") ?? "").some((a) => a.trim() !== "");
-    return !imgAlt;
+// Whether a focus-rule declaration draws something a user can see on this
+// element: non-negating values only, never transparent, and never the
+// exact color of the backdrop the element already sits on.
+function declShowsOn(el: El, d: Decl, ctx: Ctx): boolean {
+  const prop = d.prop;
+  if (COLOR_PROPS.has(prop) || prop === "background") {
+    const token = prop === "background" ? bgColorToken(d.value) : d.value;
+    if (prop === "background" && (token === "none" || token === "__unresolvable__")) {
+      return /url\(|gradient\(/i.test(d.value);
+    }
+    const which = prop === "background-color" || prop === "background" ? "background-color" : "color";
+    const r = resolveColorString(el, which, token, ctx, 0);
+    if (r === "transparent" || r === "unresolvable") return false;
+    if (r.a <= 0.02) return false;
+    const bg = effectiveBackground(el, ctx);
+    if (bg !== "unresolvable" && sameColor(r, bg)) return false;
+    if (prop === "color") {
+      const cur = resolveColor(el, "color", ctx, 0);
+      if (cur !== "transparent" && cur !== "unresolvable" && sameColor(r, cur)) return false;
+    }
+    return true;
+  }
+  const bg = effectiveBackground(el, ctx);
+  let meaningful = 0;
+  let paintedBg = 0;
+  let nonzeroLen = false;
+  // Collapse whitespace inside functional notation so `rgba(0, 0, 0, 0)`
+  // stays one token.
+  const value = d.value.replace(/\([^)]*\)/g, (m) => m.replace(/\s+/g, ""));
+  for (const t of value.split(/\s+/)) {
+    if (t === "" || NEGATING.test(t)) continue;
+    if (/^transparent$/i.test(t)) { paintedBg += 1; continue; }
+    const c = parseNumericColor(t);
+    if (c !== null) {
+      if (c.a <= 0.02 || (bg !== "unresolvable" && sameColor(c, bg))) paintedBg += 1;
+      else meaningful += 1;
+      continue;
+    }
+    const len = t.match(/^-?([\d.]+)\s*(?:px|pt|em|rem|%)?$/i);
+    if (len !== null && parseFloat(len[1] ?? "0") !== 0) nonzeroLen = true;
+    meaningful += 1;
+  }
+  if (PAINT_PROPS.has(prop) && paintedBg > 0) return false;
+  if (prop === "box-shadow") return meaningful > 0 && nonzeroLen;
+  return meaningful > 0;
+}
+
+function checkFocus(ctx: Ctx): CheckResult {
+  let ruleCount = 0;
+  let visible = 0;
+  for (const el of ctx.doc.els) {
+    if (el.styleText === null) continue;
+    const css = el.styleText.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of css.matchAll(/([^{}]*:focus[^{}]*){([^}]*)}/gi)) {
+      ruleCount += 1;
+      // The rule must reach at least one element a keyboard user can
+      // focus: its base selector (state pseudos stripped) has to match a
+      // rendered control, or - for :focus-within - wrap one.
+      const targets = new Set<El>();
+      for (const rawSel of (m[1] ?? "").split(",")) {
+        if (!FOCUS_STATE.test(rawSel)) continue;
+        const sel = parseSelector(focusBase(rawSel));
+        if (sel === null) continue;
+        const within = /:focus-within\b/.test(rawSel);
+        for (const e of ctx.doc.els) {
+          if (!matchSelector(e, sel) || !rendered(e, ctx)) continue;
+          if (isControl(e) || (within && hasControlInside(e, ctx, 0))) targets.add(e);
+        }
+      }
+      if (targets.size === 0) continue;
+      const shows = parseDecls(m[2] ?? "", 0).some((d) =>
+        INDICATOR_PROPS.test(d.prop) && [...targets].some((t) => declShowsOn(t, d, ctx)));
+      if (shows) visible += 1;
+    }
+  }
+  return {
+    id: "no-focus-style", pass: visible > 0, targets: ruleCount, silenced: ruleCount > 0 && visible === 0,
+    detail: visible ? "visible focus indicator" : ruleCount ? "focus rules draw no visible indicator" : "no visible focus style",
+  };
+}
+
+function checkLinks(ctx: Ctx): CheckResult {
+  const links = ctx.doc.els.filter((e) => e.tag === "a" && rendered(e, ctx));
+  let silenced = false;
+  const bad = links.filter((e) => {
+    const al = e.attrs["aria-label"];
+    const named = labelledByName(e, ctx);
+    if (named !== null) {
+      if (named.ok) return false;
+      if (named.quieting) silenced = true;
+      return true;
+    }
+    if ((al ?? "").trim() !== "") return false;
+    if (al !== undefined && al.trim() === "") silenced = true;
+    if (decode(elText(e)).trim() !== "") return false;
+    const namedImg = e.children.some(function hasAlt(c): boolean {
+      if (typeof c === "string") return false;
+      if ((c.attrs["alt"] ?? "").trim() !== "") return true;
+      return c.children.some(hasAlt);
+    });
+    return !namedImg;
   });
-  return { id: "empty-link", pass: bad.length === 0, targets: links.length, detail: bad.length ? `${bad.length}/${links.length} links unnamed` : `${links.length} links named` };
+  return { id: "empty-link", pass: bad.length === 0, targets: links.length, silenced: silenced && bad.length > 0, detail: bad.length ? `${bad.length}/${links.length} links unnamed` : `${links.length} links named` };
 }
 
-function checkTables(html: string): CheckResult {
-  const tables = [...html.matchAll(/<table\b[^>]*>[\s\S]*?<\/table>/gi)].map((m) => m[0]);
-  const bad = tables.filter((t) => !/<th\b/i.test(t));
-  return { id: "table-headers", pass: bad.length === 0, targets: tables.length, detail: bad.length ? `${bad.length}/${tables.length} tables lack headers` : `${tables.length} tables headed` };
+function checkTables(ctx: Ctx): CheckResult {
+  const tables = ctx.doc.els.filter((e) => e.tag === "table" && rendered(e, ctx));
+  const bad = tables.filter((t) => !t.children.some(function hasTh(c): boolean {
+    if (typeof c === "string") return false;
+    if (c.tag === "th" || ["columnheader", "rowheader"].includes((c.attrs["role"] ?? "").toLowerCase())) return true;
+    return c.children.some(hasTh);
+  }));
+  return { id: "table-headers", pass: bad.length === 0, targets: tables.length, silenced: false, detail: bad.length ? `${bad.length}/${tables.length} tables lack headers` : `${tables.length} tables headed` };
+}
+
+// Hiding signals are counted on parsed attributes and declarations only,
+// so prose containing the word "hidden" or "display" cannot inflate the
+// count. Sheet rules come from ctx.rules; inline styles are reparsed.
+const HIDE_VALUE: Record<string, RegExp> = {
+  display: /^none$/i,
+  visibility: /^(?:hidden|collapse)$/i,
+  opacity: /^0(?:\.0+)?$/,
+  "font-size": /^0(?:[a-z%]*)$/i,
+  "text-indent": /^-/,
+  color: /^transparent$/i,
+};
+
+// Which elements carry a hide signal, as keys stable across a
+// broken/fixed pair: `tag#id` or `tag.class`, with a document-order
+// ordinal when the base repeats. Comparing keys instead of counts
+// catches a fix that drops one hidden element but hides a different
+// one in its place.
+function hiddenKeys(ctx: Ctx): Set<string> {
+  const isHide = (d: Decl) => HIDE_VALUE[d.prop]?.test(d.value.trim()) === true;
+  const ordinals = new Map<string, number>();
+  const keyOf = (e: El): string => {
+    const id = (e.attrs["id"] ?? "").trim();
+    const cls = (e.attrs["class"] ?? "").split(/\s+/).filter(Boolean).sort().join(".");
+    const base = `${e.tag}${id !== "" ? `#${id}` : ""}${cls !== "" ? `.${cls}` : ""}`;
+    const n = ordinals.get(base) ?? 0;
+    ordinals.set(base, n + 1);
+    return n === 0 ? base : `${base}~${n}`;
+  };
+  const keys = new Map<number, string>();
+  for (const e of ctx.doc.els) keys.set(e.order, keyOf(e));
+  const hidden = new Set<string>();
+  const mark = (e: El) => hidden.add(keys.get(e.order) ?? e.tag);
+  for (const e of ctx.doc.els) {
+    if (e.attrs["hidden"] !== undefined) mark(e);
+    if ((e.attrs["aria-hidden"] ?? "").trim().toLowerCase() === "true") mark(e);
+    if (parseDecls(e.attrs["style"] ?? "", 0).some(isHide)) mark(e);
+  }
+  for (const r of ctx.rules) {
+    if (!r.decls.some(isHide)) continue;
+    for (const sel of r.sels) for (const e of ctx.doc.els) if (matchSelector(e, sel)) mark(e);
+  }
+  return hidden;
+}
+
+// ---------- public surface ----------
+
+export function visibleWords(html: string): string[] {
+  const ctx = buildCtx(html);
+  const doc = ctx.doc;
+  const parts: string[] = [];
+  const walk = (el: El) => {
+    if (!rendered(el, ctx)) return;
+    for (const c of el.children) {
+      if (typeof c === "string") {
+        if (el.tag === "#root" || (!RAW_TEXT.has(el.tag) && !ancestors(el).some((a) => a.tag === "head"))) parts.push(c);
+      } else walk(c);
+    }
+  };
+  walk(doc.root);
+  const text = decode(parts.join(" ").toLowerCase().replace(/\s+/g, " ").trim());
+  return text ? text.split(" ").filter(Boolean) : [];
 }
 
 export function analyze(html: string): Analysis {
+  const ctx = buildCtx(html);
+  const doc = ctx.doc;
+  const counts: ElementCounts = { img: 0, input: 0, select: 0, textarea: 0, link: 0, table: 0, button: 0, heading: 0, control: 0 };
+  for (const e of doc.els) {
+    if (!rendered(e, ctx)) continue;
+    if (e.tag === "img") counts.img += 1;
+    else if (e.tag === "input") counts.input += 1;
+    else if (e.tag === "select") counts.select += 1;
+    else if (e.tag === "textarea") counts.textarea += 1;
+    else if (e.tag === "a" && e.attrs["href"] !== undefined) counts.link += 1;
+    else if (e.tag === "table") counts.table += 1;
+    else if (e.tag === "button") counts.button += 1;
+    if (/^h[1-6]$/.test(e.tag) || (e.attrs["role"] ?? "").toLowerCase() === "heading") counts.heading += 1;
+    if (isControl(e)) counts.control += 1;
+  }
+  const hidden = [...hiddenKeys(ctx)].sort();
   return {
     checks: [
-      checkAlt(html), checkLabels(html), checkContrast(html), checkHeadings(html),
-      checkTabindex(html), checkDivButton(html), checkLang(html), checkFocus(html),
-      checkLinks(html), checkTables(html),
+      checkAlt(ctx), checkLabels(ctx), checkContrast(ctx), checkHeadings(ctx),
+      checkTabindex(ctx), checkDivButton(ctx), checkLang(ctx), checkFocus(ctx),
+      checkLinks(ctx), checkTables(ctx),
     ],
     words: visibleWords(html),
-    counts: {
-      img: tagCount(html, "img"), input: tagCount(html, "input"), select: tagCount(html, "select"),
-      textarea: tagCount(html, "textarea"), link: tagCount(html, "a"),
-      table: tagCount(html, "table"), button: tagCount(html, "button"),
-    },
-    hideCount: (html.match(/display\s*:\s*none|visibility\s*:\s*hidden|aria-hidden\s*=\s*["']?true/gi) ?? []).length,
+    counts,
+    hidden,
   };
 }

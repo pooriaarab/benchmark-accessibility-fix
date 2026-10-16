@@ -18,16 +18,32 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      - uses: pooriaarab/vibecodereview@v1
+      # claude.ai/install.sh now 403s GitHub-hosted runners; the action skips
+      # its own install when claude is already on PATH.
+      - name: Install Claude Code CLI for the chair
+        run: npm install -g @anthropic-ai/claude-code@2.1.296
+      # v1.11.0. Pinned to a commit SHA: this workflow forwards long-lived
+      # provider secrets, so the mutable v1 tag must not be able to change
+      # what runs under them.
+      # Keep edits to this file on branches whose PR diff includes them:
+      # claude-code-action mints its app token only when the merge ref's copy
+      # matches the default branch, and a stack that inherits a change here
+      # without touching it has every chair attempt refused.
+      - uses: pooriaarab/vibecodereview@4af6668bd1458ad6f75c3b65ca4938f95256c8ee
         with:
           vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}
           vibetrace_ingest_token: ${{ secrets.VIBETRACE_INGEST_TOKEN }}
           max_council_runs: 3
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_code_oauth_token_2: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_2 }}
+          claude_code_oauth_token_3: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_3 }}
           claude_code_oauth_token_4: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_4 }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           moonshot_api_key: ${{ secrets.MOONSHOT_API_KEY }}
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          devin_cli_key: ${{ secrets.DEVIN_CLI_KEY }}
+          cursor_api_key: ${{ secrets.CURSOR_API_KEY }}
+          xai_api_key: ${{ secrets.XAI_API_KEY }}
