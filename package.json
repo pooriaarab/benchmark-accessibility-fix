@@ -14,7 +14,7 @@
     "./api": { "types": "./dist/api.d.ts", "import": "./dist/api.js" }
   },
   "bin": { "benchmark-accessibility-fix": "./dist/cli.js" },
-  "files": ["dist", "data", "README.md", "AGENTS.md", "llms.txt", "server.json", "LICENSE"],
+  "files": ["dist", "data", "scripts/gen-tasks.mjs", "README.md", "AGENTS.md", "llms.txt", "server.json", "LICENSE"],
   "engines": { "node": ">=20" }, "sideEffects": false,
   "scripts": {
     "lint": "oxlint src scripts", "typecheck": "tsc --noEmit", "build": "tsup",

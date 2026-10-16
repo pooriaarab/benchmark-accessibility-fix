@@ -189,6 +189,26 @@ comparisons uses another seed and stays out of git and npm:
 node scripts/gen-tasks.mjs --seed 999 --split hidden --out artifacts/tasks.hidden.jsonl
 ```
 
+Every surface accepts an alternate task file, so a hidden split runs the
+same way as the public one:
+
+- CLI: `--tasks <path>` on any command, for example
+  `benchmark-accessibility-fix run --model offline --provider mock --tasks artifacts/tasks.hidden.jsonl`.
+  Any readable JSONL path works.
+- SDK: `run(adapter, { tasksPath })` or `score(id, submission, { tasksPath })`.
+  Each call builds a fresh benchmark object, so alternating paths in one
+  process never shares a cached task list.
+- HTTP API: `?tasks=<path>` on any route, or a `"tasksPath"` field in the
+  `POST /v1/score` body. The path must land inside the package or in a
+  directory named by the `A11Y_TASK_DIRS` environment allow-list
+  (colon-separated); anything else gets a 403.
+- MCP: set `A11Y_TASKS` to the file path before starting the server, or
+  pass `--tasks` to the `mcp` command.
+
+The generator ships in the npm package (`scripts/gen-tasks.mjs`), so
+`npx` users can build a split without cloning the repo. It contains no
+private seed - pick your own.
+
 ## Limits
 
 The static analyzer cannot run layout, zoom, or assistive technology,
@@ -252,9 +272,9 @@ and a grader that verifies the repair instead of trusting the model.
 
 ### Can I use a hidden split?
 
-Yes. Generate one with another seed, keep the file outside git and the
-npm package, and score against the same grader. The public seed is
-20261015.
+Yes. Generate one with another seed, keep the file outside git, and run
+or score against it with `--tasks` / `tasksPath` on any surface. The
+public seed is 20261015.
 
 ## License
 
