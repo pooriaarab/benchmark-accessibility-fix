@@ -5,9 +5,10 @@
 // commented-out rules cannot pass one.
 
 import {
-  ancestors, cascadeNumber, decode, elText, over, parseDecls, parseDoc,
-  parseNumericColor, ratioOf, RAW_TEXT, rendered, resolveColor, styleRules,
-  type Ctx, type Decl, type Doc, type El, type Resolved, type Rgba, type Rule,
+  ancestors, bgColorToken, cascadeNumber, decode, elText, matchSelector, over,
+  parseDecls, parseDoc, parseNumericColor, parseSelector, ratioOf, RAW_TEXT,
+  rendered, resolveColor, resolveColorString, styleRules,
+  type Ctx, type Decl, type El, type Rgba,
 } from "./a11y-dom.js";
 
 export const CHECK_IDS = [
@@ -151,6 +152,27 @@ function checkLabels(ctx: Ctx): CheckResult {
   return { id: "unlabeled-input", pass: bad.length === 0, targets: needing.length, silenced, detail: bad.length ? `${bad.length}/${needing.length} fields unlabeled` : `${needing.length} fields labelled` };
 }
 
+// Effective backdrop under an element: ancestor background layers
+// composited until opaque, white at the root.
+function effectiveBackground(el: El, ctx: Ctx): Rgba | "unresolvable" {
+  const layers: Rgba[] = [];
+  let cur: El | null = el;
+  while (cur && cur.tag !== "#root") {
+    const b = resolveColor(cur, "background-color", ctx, 0);
+    if (b === "unresolvable") return "unresolvable";
+    if (b !== "transparent") layers.push(b);
+    if (layers.length > 0 && (layers[layers.length - 1]?.a ?? 1) >= 1) break;
+    cur = cur.parent;
+  }
+  let bg: Rgba = { r: 255, g: 255, b: 255, a: 1 };
+  for (const l of [...layers].reverse()) bg = over(l, bg);
+  return bg;
+}
+
+function sameColor(a: Rgba, b: Rgba): boolean {
+  return Math.abs(a.r - b.r) < 2 && Math.abs(a.g - b.g) < 2 && Math.abs(a.b - b.b) < 2 && Math.abs(a.a - b.a) < 0.02;
+}
+
 function checkContrast(ctx: Ctx): CheckResult {
   const targets = textEls(ctx);
   let bad = 0;
@@ -158,20 +180,9 @@ function checkContrast(ctx: Ctx): CheckResult {
   for (const el of targets) {
     const fg = resolveColor(el, "color", ctx, 0);
     if (fg === "unresolvable" || fg === "transparent") { bad += 1; continue; }
-    // Effective background: composite ancestor layers until opaque.
-    let bg: Rgba = { r: 255, g: 255, b: 255, a: 1 };
-    let bgBad = false;
-    const layers: Rgba[] = [];
-    let cur: El | null = el;
-    while (cur && cur.tag !== "#root") {
-      const b = resolveColor(cur, "background-color", ctx, 0);
-      if (b === "unresolvable") { bgBad = true; break; }
-      if (b !== "transparent") layers.push(b);
-      if (layers.length > 0 && (layers[layers.length - 1]?.a ?? 1) >= 1) break;
-      cur = cur.parent;
-    }
-    if (bgBad) { bad += 1; continue; }
-    for (const l of [...layers].reverse()) bg = over(l, bg);
+    const backdrop = effectiveBackground(el, ctx);
+    if (backdrop === "unresolvable") { bad += 1; continue; }
+    const bg = backdrop;
     const ink = over(fg, bg);
     const size = cascadeNumber(el, "font-size", ctx, 0);
     const weight = cascadeNumber(el, "font-weight", ctx, 0);
@@ -250,7 +261,11 @@ function checkDivButton(ctx: Ctx): CheckResult {
     const buttonish = (e.attrs["class"] ?? "").split(/\s+/).some((c) => BUTTONISH.test(c))
       && e.children.some((c) => typeof c === "string" && c.trim() !== "");
     const interactiveRole = INTERACTIVE_ROLES.has(role);
-    if (interactiveRole && kb) continue; // role plus keyboard support is a repair
+    // Role plus keyboard support is a repair only when the element can
+    // actually take focus: a non-negative tabindex, like a native control.
+    const ti = e.attrs["tabindex"];
+    const tabOk = ti !== undefined && Number.isFinite(Number(ti.trim())) && Number(ti.trim()) >= 0;
+    if (interactiveRole && kb && tabOk) continue;
     if (handler || interactiveRole || buttonish) {
       bad += 1;
       if (!handler && !interactiveRole) silenced = true;
@@ -269,6 +284,97 @@ function checkLang(ctx: Ctx): CheckResult {
 
 const NEGATING = /^(none|0|0px|0em|0rem|auto|medium|inherit|initial|unset)$/i;
 const INDICATOR_PROPS = /^(outline|outline-width|outline-style|outline-color|box-shadow|border|border-width|border-style|border-color|text-decoration|background|background-color|color)$/;
+// Props whose value is a single color the rule paints with.
+const COLOR_PROPS = new Set(["color", "background-color", "outline-color", "border-color"]);
+// Shorthands that paint with an explicit color: when every color token in
+// the value is invisible (transparent or the backdrop itself), the
+// indicator is invisible too.
+const PAINT_PROPS = new Set(["outline", "border", "box-shadow", "text-decoration"]);
+const FOCUS_STATE = /:focus(?:-visible|-within)?\b/;
+
+// Drop every pseudo-class/element so the selector can be matched against
+// the base render; a bare ":focus" becomes the universal selector.
+// Bracket-aware so attribute values containing colons survive.
+function focusBase(sel: string): string {
+  let out = "";
+  let depth = 0;
+  for (let i = 0; i < sel.length; i += 1) {
+    const ch = sel[i] ?? "";
+    if (ch === "[") depth += 1;
+    else if (ch === "]") depth -= 1;
+    else if (ch === ":" && depth === 0) {
+      let j = i + 1;
+      if (sel[j] === ":") j += 1;
+      while (j < sel.length && /[\w-]/.test(sel[j] ?? "")) j += 1;
+      if (sel[j] === "(") {
+        let inner = 0;
+        while (j < sel.length) {
+          if (sel[j] === "(") inner += 1;
+          if (sel[j] === ")") inner -= 1;
+          j += 1;
+          if (inner <= 0) break;
+        }
+      }
+      i = j - 1;
+      continue;
+    }
+    out += ch;
+  }
+  const base = out.trim();
+  return base === "" || base === "*" ? "*" : base;
+}
+
+function hasControlInside(el: El, ctx: Ctx, depth: number): boolean {
+  if (depth > 24) return false;
+  for (const c of el.children) {
+    if (typeof c === "string") continue;
+    if (rendered(c, ctx) && (isControl(c) || hasControlInside(c, ctx, depth + 1))) return true;
+  }
+  return false;
+}
+
+// Whether a focus-rule declaration draws something a user can see on this
+// element: non-negating values only, never transparent, and never the
+// exact color of the backdrop the element already sits on.
+function declShowsOn(el: El, d: Decl, ctx: Ctx): boolean {
+  const prop = d.prop;
+  if (COLOR_PROPS.has(prop) || prop === "background") {
+    const token = prop === "background" ? bgColorToken(d.value) : d.value;
+    if (prop === "background" && (token === "none" || token === "__unresolvable__")) {
+      return /url\(|gradient\(/i.test(d.value);
+    }
+    const which = prop === "background-color" || prop === "background" ? "background-color" : "color";
+    const r = resolveColorString(el, which, token, ctx, 0);
+    if (r === "transparent" || r === "unresolvable") return false;
+    const bg = effectiveBackground(el, ctx);
+    if (bg !== "unresolvable" && sameColor(r, bg)) return false;
+    if (prop === "color") {
+      const cur = resolveColor(el, "color", ctx, 0);
+      if (cur !== "transparent" && cur !== "unresolvable" && sameColor(r, cur)) return false;
+    }
+    return true;
+  }
+  const bg = effectiveBackground(el, ctx);
+  let meaningful = 0;
+  let paintedBg = 0;
+  let nonzeroLen = false;
+  for (const t of d.value.split(/\s+/)) {
+    if (t === "" || NEGATING.test(t)) continue;
+    if (/^transparent$/i.test(t)) { paintedBg += 1; continue; }
+    const c = parseNumericColor(t);
+    if (c !== null) {
+      if (bg !== "unresolvable" && sameColor(c, bg)) paintedBg += 1;
+      else meaningful += 1;
+      continue;
+    }
+    const len = t.match(/^-?([\d.]+)\s*(?:px|pt|em|rem|%)?$/i);
+    if (len !== null && parseFloat(len[1] ?? "0") !== 0) nonzeroLen = true;
+    meaningful += 1;
+  }
+  if (PAINT_PROPS.has(prop) && paintedBg > 0) return false;
+  if (prop === "box-shadow") return meaningful > 0 && nonzeroLen;
+  return meaningful > 0;
+}
 
 function checkFocus(ctx: Ctx): CheckResult {
   let ruleCount = 0;
@@ -278,14 +384,29 @@ function checkFocus(ctx: Ctx): CheckResult {
     const css = el.styleText.replace(/\/\*[\s\S]*?\*\//g, "");
     for (const m of css.matchAll(/([^{}]*:focus[^{}]*){([^}]*)}/gi)) {
       ruleCount += 1;
+      // The rule must reach at least one element a keyboard user can
+      // focus: its base selector (state pseudos stripped) has to match a
+      // rendered control, or - for :focus-within - wrap one.
+      const targets = new Set<El>();
+      for (const rawSel of (m[1] ?? "").split(",")) {
+        if (!FOCUS_STATE.test(rawSel)) continue;
+        const sel = parseSelector(focusBase(rawSel));
+        if (sel === null) continue;
+        const within = /:focus-within\b/.test(rawSel);
+        for (const e of ctx.doc.els) {
+          if (!matchSelector(e, sel) || !rendered(e, ctx)) continue;
+          if (isControl(e) || (within && hasControlInside(e, ctx, 0))) targets.add(e);
+        }
+      }
+      if (targets.size === 0) continue;
       const shows = parseDecls(m[2] ?? "", 0).some((d) =>
-        INDICATOR_PROPS.test(d.prop) && d.value.split(/\s+/).some((tok) => !NEGATING.test(tok)));
+        INDICATOR_PROPS.test(d.prop) && [...targets].some((t) => declShowsOn(t, d, ctx)));
       if (shows) visible += 1;
     }
   }
   return {
     id: "no-focus-style", pass: visible > 0, targets: ruleCount, silenced: ruleCount > 0 && visible === 0,
-    detail: visible ? "visible focus indicator" : ruleCount ? "focus rules only remove indicators" : "no visible focus style",
+    detail: visible ? "visible focus indicator" : ruleCount ? "focus rules draw no visible indicator" : "no visible focus style",
   };
 }
 
