@@ -152,6 +152,7 @@ for (const task of tasks) {
 // the check even when every other fix is right.
 const FOCUS_RULE = /a:focus-visible,[^{]*\{[^}]*\}/;
 const bodyBg = (t) => t.expected.match(/body\{[^}]*background-color:(#[0-9a-fA-F]{6})/)?.[1] ?? "#ffffff";
+const bodyInk = (t) => t.expected.match(/body\{(?:[^};]*;)*?color:(#[0-9a-fA-F]{6})/)?.[1] ?? "#000000";
 for (const task of tasks) {
   const variants = [
     ["negating", task.expected.replace(FOCUS_RULE, ":focus{outline:none;background:transparent}")],
@@ -167,6 +168,22 @@ for (const task of tasks) {
   const ok = task.expected.replace(FOCUS_RULE, "a:focus-visible{outline:2px dashed #123456}");
   const good = await benchmark.score(task, { answer: ok });
   assert.equal(good.score, 1, `${task.id} valid focus variant scored ${good.score}: ${good.reason}`);
+  // A :focus-within rule whose container wraps a real control counts:
+  // every page's form holds inputs and a submit button.
+  const within = task.expected.replace(FOCUS_RULE, "form:focus-within{outline:2px solid red}");
+  const withinGood = await benchmark.score(task, { answer: within });
+  assert.equal(withinGood.score, 1, `${task.id} form:focus-within scored ${withinGood.score}: ${withinGood.reason}`);
+  // A color-only indicator repaints the text: a fresh hue counts.
+  const ink = bodyInk(task);
+  const repaint = ["#0a0a0a", "#f0f0f0", "#123456"].find((c) => c !== ink && c !== bodyBg(task)) ?? "#123456";
+  const colorGood = await benchmark.score(task, { answer: task.expected.replace(FOCUS_RULE, `a:focus{color:${repaint}}`) });
+  assert.equal(colorGood.score, 1, `${task.id} color-only indicator scored ${colorGood.score}: ${colorGood.reason}`);
+  // Repainting the ink the element already has shows nothing, so the
+  // defect stays unfixed.
+  if (task.metadata.defects.includes("no-focus-style")) {
+    const sameInk = await benchmark.score(task, { answer: task.expected.replace(FOCUS_RULE, `a:focus{color:${ink}}`) });
+    assert.ok(sameInk.score < 1, `${task.id} same-ink indicator scored ${sameInk.score}: ${sameInk.reason}`);
+  }
 }
 // A role="button" with a keyboard handler but no tabindex cannot take
 // focus; adding tabindex="0" completes the repair.
