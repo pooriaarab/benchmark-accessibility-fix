@@ -25,7 +25,7 @@ const NAMED_SRC =
   "slategrey=112,128,144 snow=255,250,250 springgreen=0,255,127 steelblue=70,130,180 tan=210,180,140 thistle=216,191,216 tomato=255,99,71 turquoise=64,224,208" +
   "violet=238,130,238 wheat=245,222,179 whitesmoke=245,245,245 yellowgreen=154,205,50";
 
-const NAMED = new Map<string, [number, number, number]>(NAMED_SRC.split(" ").map((e) => {
+const NAMED = new Map<string, [number, number, number]>((NAMED_SRC.match(/[a-z]+=\d+,\d+,\d+/g) ?? []).map((e) => {
   const [k, v] = e.split("=");
   const [r, g, b] = (v ?? "").split(",").map(Number);
   return [k ?? "", [r ?? 0, g ?? 0, b ?? 0]];
