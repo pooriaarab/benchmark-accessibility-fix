@@ -1,10 +1,19 @@
 # benchmark-accessibility-fix
 
-> Fix a broken page so keyboard, screen-reader and contrast checks pass.
+> Repair a broken HTML page so keyboard, screen-reader, and contrast checks pass.
 
 Package: https://www.npmjs.com/package/benchmark-accessibility-fix
 Repository: https://github.com/pooriaarab/benchmark-accessibility-fix
 Directory: https://aibenchmarkindex.com/benchmarks/benchmark-accessibility-fix
+
+## What it measures
+
+Each of the 40 tasks ships a small HTML page with two to four seeded
+defects (missing alt text, unlabeled inputs, low contrast, heading order,
+positive tabindex, div-as-button, missing lang, no focus style, empty
+link, table without headers). The model returns the fixed document. The
+deterministic grader in `src/a11y.ts` checks the repair and penalizes
+regressions, deleted text, removed elements, and hidden content.
 
 ## Exports
 
@@ -14,6 +23,14 @@ The root exports `benchmark`, `run`, and `score`. `benchmark-accessibility-fix/a
 
 The CLI supports list, show, run, score, card, provenance, index-entry, serve, and mcp. Use the mock provider for offline verification.
 
+## Data and grading
+
+Tasks come from `scripts/gen-tasks.mjs --seed 20261015` (see
+`data/PROVENANCE.md`). Grading rules and failure modes live in
+`docs/grading.md`. Regenerate tasks with `npm run generate:tasks`.
+
 ## Verification
 
-Run `npm run ci:local`. The report is `artifacts/e2e-report.json`.
+Run `npm run ci:local`. The report is `artifacts/e2e-report.json`. The
+E2E scores every reference fix (each must reach 1) and four trivial
+answers per task (each must score 0).
