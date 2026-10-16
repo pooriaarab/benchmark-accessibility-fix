@@ -169,8 +169,11 @@ for (const task of tasks) {
   assert.equal(good.score, 1, `${task.id} valid focus variant scored ${good.score}: ${good.reason}`);
 }
 // A role="button" with a keyboard handler but no tabindex cannot take
-// focus; adding tabindex="0" completes the repair.
-for (const task of tasks.filter((t) => t.metadata.defects.includes("div-button"))) {
+// focus; adding tabindex="0" completes the repair. Only tasks whose
+// broken page divved the CTA qualify: when the defect hit the tab
+// widget instead, the CTA is still a real <button> and swapping it for
+// a div is a genuine element removal, not a fake-button probe.
+for (const task of tasks.filter((t) => t.metadata.defects.includes("div-button") && !brokenOf(t.prompt).includes('type="button"'))) {
   const noTab = task.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, '<div role="button" onkeydown="go()">$1</div>');
   const bad = await benchmark.score(task, { answer: noTab });
   assert.ok(bad.score < 1, `${task.id} role+keydown without tabindex scored ${bad.score}: ${bad.reason}`);
@@ -251,6 +254,35 @@ for (const [i, h] of hidden.entries()) {
   const r = await benchmark.score(h, { answer: tasks[i % tasks.length].expected });
   assert.ok(r.score < 1, `public reference scored ${r.score} on hidden ${h.id}`);
   if (r.score === 1) leaked += 1;
+}
+
+// ---- Template-leak tokens never reach the data ----
+// A builder or breaker that reads a missing field strings "undefined",
+// "NaN", "[object Object]" or "null" into the page (a hard-tier breaker
+// once shipped `href="undefined"` on 9 of 13 public tasks). The
+// generator throws on these tokens; the gate scans shipped data too.
+const JUNK = /\bundefined\b|\bNaN\b|\[object Object\]|\bnull\b/;
+for (const t of [...tasks, ...hidden]) {
+  assert.ok(!JUNK.test(t.prompt) && !JUNK.test(t.expected), `${t.id} contains a template-leak token`);
+}
+
+// ---- Every hidden reference page scores 1 under the grader ----
+// A reference page that fails a check caps its own task below 1 (an
+// inline span once drew under 4.5:1 against the body background on
+// seeds 7 and 91). The generator re-draws until the real grader scores
+// it 1; this gate holds that over 25 hidden seeds.
+const EXPECTED_SEEDS = [7, 91, ...Array.from({ length: 23 }, (_, i) => i + 100)];
+let expectedChecked = 0;
+for (const s of EXPECTED_SEEDS) {
+  const out = `artifacts/tasks.hidden-${s}.jsonl`;
+  await execFile(process.execPath, ["scripts/gen-tasks.mjs", "--seed", String(s), "--split", "hidden", "--out", out]);
+  const list = (await readFile(out, "utf8")).trim().split("\n").map((l) => JSON.parse(l));
+  for (const t of list) {
+    assert.ok(!JUNK.test(t.prompt) && !JUNK.test(t.expected), `${t.id} (seed ${s}) contains a template-leak token`);
+    const r = await benchmark.score(t, { answer: t.expected });
+    assert.equal(r.score, 1, `seed ${s} ${t.id} expected scored ${r.score}: ${r.reason}`);
+    expectedChecked += 1;
+  }
 }
 
 // ---- Hard tier is structurally different ----
@@ -421,7 +453,7 @@ try {
   assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP A11Y_TASKS returned public ids");
 } finally { await hiddenClient.close(); }
 
-const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked, fixer_easy_mean: Math.round(mean(fixerTier.easy) * 1000) / 1000, fixer_hard_mean: Math.round(mean(fixerTier.hard) * 1000) / 1000 } };
+const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked, hidden_seeds: EXPECTED_SEEDS.length, hidden_expected_checked: expectedChecked, fixer_easy_mean: Math.round(mean(fixerTier.easy) * 1000) / 1000, fixer_hard_mean: Math.round(mean(fixerTier.hard) * 1000) / 1000 } };
 await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
 assert.match(await readFile("data/PROVENANCE.md", "utf8"), /Synthetic accessibility fixtures/);

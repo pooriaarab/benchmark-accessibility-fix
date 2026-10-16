@@ -119,7 +119,7 @@ const definition: BenchmarkDefinition<Task> = {
   },
   provenance: [{
     name: "Synthetic accessibility fixtures", kind: "synthetic", url: "https://github.com/pooriaarab/benchmark-accessibility-fix/blob/main/scripts/gen-tasks.mjs",
-    licence: "MIT", howToGet: "Run `node scripts/gen-tasks.mjs --seed 20261015` from the repository root. A hidden split uses another seed: `node scripts/gen-tasks.mjs --seed <n> --split hidden --out <path>`; hidden files use a11yh- ids and stay out of git and npm.", retrievedAt: "2026-10-16T00:00:00.000Z",
+    licence: "MIT", howToGet: "Run `npm run generate:tasks` (or `node scripts/gen-tasks.mjs --seed 20261015` after `npm run build`) from the repository root. The generator grades every reference page with the built package and re-draws until it scores 1. A hidden split uses another seed: `node scripts/gen-tasks.mjs --seed <n> --split hidden --out <path>`; hidden files use a11yh- ids and stay out of git and npm.", retrievedAt: "2026-10-16T00:00:00.000Z",
     contaminationNotes: "Public tasks use seed 20261015. Treat them as possibly in training data; use a separately seeded hidden split for final comparisons.",
     refresh: "Change the seed, run the generator, and review the JSONL diff.",
   }],
