@@ -1,8 +1,8 @@
 {
   "name": "benchmark-accessibility-fix",
   "version": "0.1.0",
-  "description": "Fix a broken page so keyboard, screen-reader and contrast checks pass.",
-  "keywords": ["ai-benchmark", "llm-evaluation", "model-evaluation", "evals", "grading", "openrouter", "openai", "mcp", "typescript", "agent-benchmark"],
+  "description": "Benchmark for accessible HTML fixes: alt text, labels, contrast, keyboard support.",
+  "keywords": ["ai-benchmark", "llm-evaluation", "model-evaluation", "evals", "grading", "accessibility", "a11y", "wcag", "openrouter", "openai", "mcp", "typescript", "agent-benchmark"],
   "homepage": "https://private-repo-337e.com/benchmarks/benchmark-accessibility-fix",
   "bugs": "https://github.com/pooriaarab/benchmark-accessibility-fix/issues",
   "repository": { "type": "git", "url": "git+https://github.com/pooriaarab/benchmark-accessibility-fix.git" },
