@@ -25,6 +25,10 @@ jobs:
       # v1.11.0. Pinned to a commit SHA: this workflow forwards long-lived
       # provider secrets, so the mutable v1 tag must not be able to change
       # what runs under them.
+      # Keep edits to this file on branches whose PR diff includes them:
+      # claude-code-action mints its app token only when the merge ref's copy
+      # matches the default branch, and a stack that inherits a change here
+      # without touching it has every chair attempt refused.
       - uses: pooriaarab/vibecodereview@4af6668bd1458ad6f75c3b65ca4938f95256c8ee
         with:
           vibetrace_ingest_url: ${{ secrets.VIBETRACE_INGEST_URL }}
