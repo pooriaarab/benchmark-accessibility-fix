@@ -219,6 +219,64 @@ for (const [i, h] of hidden.entries()) {
   if (r.score === 1) leaked += 1;
 }
 
+// ---- Hard tier is structurally different ----
+// A template-aware regex fixer that repairs every easy task must score
+// clearly below 1 on hard tasks: the hard skeleton carries defects a
+// template fixer cannot see (dangling name chains, Tab traps, nested
+// controls, widgets hidden from AT, spanning-header tables).
+const regexFix = (html) => {
+  let out = html;
+  if (!/<html[^>]*\blang\s*=/.test(out)) out = out.replace(/<html\b/, '<html lang="en"');
+  out = out.replace(/<img\b(?![^>]*\balt\s*=)[^>]*>/g, (m) => m.replace(/>$/, ' alt="photo">'));
+  out = out.replace(/ alt=""/g, ' alt="photo"');
+  out = out.replace(/<input\b(?![^>]*\baria-label)[^>]*>/g, (m) => /aria-labelledby/.test(m) ? m : m.replace(/>$/, ' aria-label="field">'));
+  out = out.replace(/<label for="([^"]*)"><\/label>/g, '<label for="$1">Label</label>');
+  out = out.replace(/<label for="missing-([^"]*)">/g, '<label for="$1">');
+  out = out.replace(/<\/style>/, 'body,p,span,div,td,th,label,legend,button,a,input{color:#101418 !important;background-color:#ffffff !important}</style>');
+  if (!/<h1[ >]/.test(out)) out = out.replace(/<h2>/, '<h1>').replace(/<\/h2>/, '</h1>');
+  out = out.replace(/<h5\b/g, '<h3').replace(/<\/h5>/g, '</h3>');
+  out = out.replace(/\s*tabindex="(?:[1-9]\d*|-\d+)"/g, '');
+  out = out.replace(/<(div|span)\b[^>]*\bonclick="[^"]*"[^>]*>([\s\S]*?)<\/\1>/g, '<button type="button">$2</button>');
+  out = out.replace(/<div\b[^>]*\brole="button"[^>]*>([\s\S]*?)<\/div>/g, '<button type="button">$1</button>');
+  if (!/:focus/.test(out)) out = out.replace(/<\/style>/, 'a:focus-visible,button:focus-visible,input:focus-visible,[role]:focus-visible{outline:3px solid #0057d8}</style>');
+  out = out.replace(/<a([^>]*?)\s*aria-label=""([^>]*)>/g, '<a$1$2>');
+  out = out.replace(/<a([^>]*)>\s*<\/a>/g, '<a$1>Link</a>');
+  out = out.replace(/<a([^>]*)>\s*<span[^>]*><\/span>\s*<\/a>/g, '<a$1>Link</a>');
+  out = out.replace(/(<tr>)([\s\S]*?)<\/tr>/g, (m, o, cells) => /<td/.test(cells) && !/<th/.test(cells)
+    ? `${o}${cells.replace(/<td/g, '<th scope="col"').replace(/<\/td>/g, '</th>')}</tr>`
+    : m);
+  return out;
+};
+const fixerTier = { easy: [], hard: [] };
+for (const t of [...tasks, ...hidden]) {
+  const r = await benchmark.score(t, { answer: regexFix(brokenOf(t.prompt)) });
+  (fixerTier[t.metadata.tier] ??= []).push(r.score);
+}
+const mean = (a) => a.reduce((x, y) => x + y, 0) / Math.max(1, a.length);
+assert.ok(mean(fixerTier.easy) >= 0.95, `template fixer should still clear easy tasks (got ${mean(fixerTier.easy).toFixed(3)})`);
+assert.ok(mean(fixerTier.hard) <= 0.75, `template fixer scored ${mean(fixerTier.hard).toFixed(3)} on hard tasks - hard tier is not structurally different`);
+// Each hard-only barrier shape fails even when every other fix is right.
+const hardTasks = tasks.filter((t) => t.metadata.tier === "hard");
+assert.ok(hardTasks.length >= 10, "not enough hard tasks to probe");
+for (const t of hardTasks) {
+  const cases = [
+    ["dangling-name", t.expected.replace('aria-labelledby="l-a l-b"', 'aria-labelledby="l-a l-gone"')],
+    ["tab-trap", t.expected.replace('onkeydown="pickTab(\'a\')"', "onkeydown=\"if(event.key==='Tab')event.preventDefault()\"")],
+    ["nested-control", t.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, '<a href="/x"><button type="button">$1</button></a>')],
+    ["hidden-widget", t.expected.replace('role="tablist"', 'role="tablist" aria-hidden="true"')],
+    ["unconditional-trap", t.expected.replace('onkeydown="pickTab(\'b\')"', 'onkeydown="event.preventDefault()"')],
+  ];
+  for (const [name, answer] of cases) {
+    assert.notEqual(answer, t.expected, `${t.id} hard probe "${name}" changed nothing`);
+    const r = await benchmark.score(t, { answer });
+    assert.ok(r.score < 1, `${t.id} hard probe "${name}" scored ${r.score}: ${r.reason}`);
+  }
+  // A handler that cancels a named non-Tab key is a normal repair, not a trap.
+  const ok = t.expected.replace('onkeydown="pickTab(\'a\')"', "onkeydown=\"if(event.key===' '){event.preventDefault();pickTab('a')}\"");
+  const good = await benchmark.score(t, { answer: ok });
+  assert.equal(good.score, 1, `${t.id} space-key handler scored ${good.score}: ${good.reason}`);
+}
+
 // ---- Alternate task paths on every surface ----
 // benchmark-core caches the task list inside each benchmark object, so
 // every path needs a fresh object. Run default, hidden, default, hidden
@@ -329,8 +387,8 @@ try {
   assert.ok(listed.every((t) => t.id.startsWith("a11yh-")), "MCP A11Y_TASKS returned public ids");
 } finally { await hiddenClient.close(); }
 
-const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked } };
+const artifact = { task_count: report.rows.length, scores: report.rows.map((row) => row.score), route_status_codes: routes, tool_names: toolNames, grader: { good_scored_1: goodHits, bad_scored_0: taskCount * 4, valid_variants: variantRuns, defect_kinds: variantsPerDefect.size, tricks_below_03: trickRuns, hidden_tasks: hidden.length, hidden_leak: leaked, fixer_easy_mean: Math.round(mean(fixerTier.easy) * 1000) / 1000, fixer_hard_mean: Math.round(mean(fixerTier.hard) * 1000) / 1000 } };
 await mkdir("artifacts", { recursive: true });
 await writeFile("artifacts/e2e-report.json", `${JSON.stringify(artifact, null, 2)}\n`);
 assert.match(await readFile("data/PROVENANCE.md", "utf8"), /Synthetic accessibility fixtures/);
-console.log(`e2e: ${artifact.task_count} tasks, ${variantRuns} variants, ${trickRuns} tricks, ${hidden.length} hidden, ${Object.keys(routes).length} routes, ${toolNames.length} tools -> all surfaces passed, ok`);
+console.log(`e2e: ${artifact.task_count} tasks, ${variantRuns} variants, ${trickRuns} tricks, ${hidden.length} hidden, ${Object.keys(routes).length} routes, ${toolNames.length} tools, fixer easy ${mean(fixerTier.easy).toFixed(3)} hard ${mean(fixerTier.hard).toFixed(3)} -> all surfaces passed, ok`);
