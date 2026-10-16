@@ -10,8 +10,8 @@
 
 ## Contracts
 
-Keep tasks, deterministic grading, and provenance in sync. Episode environments must be seeded. Grade episode traces by replaying their tool log.
+Keep tasks, deterministic grading, and provenance in sync. All tasks here are single-turn HTML repairs graded by `src/a11y.ts`; the failure modes in `docs/grading.md` are written before the grader code. Hidden splits stay in `artifacts/` and out of git and npm.
 
 Never read provider keys from repository files. OpenRouter uses `OPENROUTER_API_KEY`. OpenAI-compatible providers use `OPENAI_BASE_URL` and `OPENAI_API_KEY`.
 
-Open an issue before a branch. Use `bacf-<issue>-<slug>` and `[bacf-<issue>] Imperative subject`. Keep pull requests below 500 counted lines. Do not merge your own pull request or push `release`.
+Open an issue before a branch. Use `bacf-<issue>-<slug>` and `[BACF-<issue>] Imperative subject` (uppercase tag). Keep pull requests below 500 counted lines. Do not merge your own pull request or push `release`.
