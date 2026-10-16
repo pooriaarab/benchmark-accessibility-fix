@@ -32,9 +32,9 @@ export const benchmark = defineBenchmark({
     bad: (task) => task.kind === "episode" ? [{ content: "Skipped the tool." }] : [],
   },
   provenance: [{
-    name: "Seeded starter task generator", kind: "synthetic", url: "https://github.com/pooriaarab/benchmark-accessibility-fix/blob/main/scripts/gen-tasks.mjs",
-    licence: "MIT", howToGet: "Run `node scripts/gen-tasks.mjs` from the repository root.", retrievedAt: "2026-10-15T00:00:00.000Z",
-    contaminationNotes: "Public starter tasks generated with seed 20261015. Keep final evaluation tasks in a separately seeded hidden split.",
+    name: "Synthetic accessibility fixtures", kind: "synthetic", url: "https://github.com/pooriaarab/benchmark-accessibility-fix/blob/main/scripts/gen-tasks.mjs",
+    licence: "MIT", howToGet: "Run `node scripts/gen-tasks.mjs --seed 20261015` from the repository root. A hidden split uses another seed: `node scripts/gen-tasks.mjs --seed <n> --split hidden --out <path>`; hidden files stay out of git and npm.", retrievedAt: "2026-10-16T00:00:00.000Z",
+    contaminationNotes: "Public tasks use seed 20261015. Treat them as possibly in training data; use a separately seeded hidden split for final comparisons.",
     refresh: "Change the seed, run the generator, and review the JSONL diff.",
   }],
   gradingMethod: "Exact match for single answers; deterministic state replay for episodes.",
