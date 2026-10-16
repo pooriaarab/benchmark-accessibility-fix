@@ -61,7 +61,11 @@ export function gradeAnswer(task: Task, submission: Trace): { score: number; rea
   const contentLost = contentRatio < 0.9;
   const keys = Object.keys(broken.counts) as (keyof typeof broken.counts)[];
   const elementRemoved = keys.some((key) => fixed.counts[key] < broken.counts[key]);
-  const hideAbuse = fixed.hideCount > broken.hideCount;
+  // Element-wise, not count-wise: a fix that drops the page's hidden
+  // widget but hides `main` in its place keeps the count level while
+  // still concealing content.
+  const brokenHidden = new Set(broken.hidden);
+  const hideAbuse = fixed.hidden.some((key) => !brokenHidden.has(key));
   // A defect that still fails counts as silenced when the answer carries a
   // quieting gesture (empty alt, empty aria-label, negating focus rule)
   // rather than a repair.

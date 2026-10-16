@@ -158,6 +158,7 @@ for (const task of tasks) {
     ["no-match", task.expected.replace(FOCUS_RULE, ".nothing:focus{outline:3px solid red}")],
     ["backdrop-color", task.expected.replace(FOCUS_RULE, `a:focus{background-color:${bodyBg(task)}}`)],
     ["transparent-color", task.expected.replace(FOCUS_RULE, "a:focus{outline:2px solid transparent}")],
+    ["alpha-zero", task.expected.replace(FOCUS_RULE, "a:focus{outline:3px solid rgba(0, 0, 0, 0)}")],
   ];
   for (const [name, answer] of variants) {
     const r = await benchmark.score(task, { answer });
@@ -180,6 +181,11 @@ for (const task of tasks.filter((t) => t.metadata.defects.includes("div-button")
   const withTab = task.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, '<div role="button" onkeydown="go()" tabindex="0">$1</div>');
   const good = await benchmark.score(task, { answer: withTab });
   assert.equal(good.score, 1, `${task.id} role+keydown+tabindex scored ${good.score}: ${good.reason}`);
+  // The check is not div-specific: any non-native element wearing
+  // role="button" without a non-negative tabindex fails the same way.
+  const para = task.expected.replace(/<button class="[^"]*" type="button">([^<]*)<\/button>/, '<p role="button" onkeydown="go()">$1</p>');
+  const pBad = await benchmark.score(task, { answer: para });
+  assert.ok(pBad.score < 1, `${task.id} p role=button without tabindex scored ${pBad.score}: ${pBad.reason}`);
 }
 
 // Cheap tricks must stay below 0.3; each quiets or bypasses a check.
@@ -272,6 +278,8 @@ for (const t of [...tasks, ...hidden]) {
 // seeds 7 and 91). The generator re-draws until the real grader scores
 // it 1; this gate holds that over 25 hidden seeds.
 const EXPECTED_SEEDS = [7, 91, ...Array.from({ length: 23 }, (_, i) => i + 100)];
+const shipsHidden = /aria-hidden="true"|\shidden[ >]|display:\s*none|visibility:\s*hidden|opacity:\s*0|color:\s*transparent/;
+const swapPool = [...tasks, ...hidden].filter((t) => shipsHidden.test(brokenOf(t.prompt)));
 let expectedChecked = 0;
 for (const s of EXPECTED_SEEDS) {
   const out = `artifacts/tasks.hidden-${s}.jsonl`;
@@ -282,7 +290,21 @@ for (const s of EXPECTED_SEEDS) {
     const r = await benchmark.score(t, { answer: t.expected });
     assert.equal(r.score, 1, `seed ${s} ${t.id} expected scored ${r.score}: ${r.reason}`);
     expectedChecked += 1;
+    if (shipsHidden.test(brokenOf(t.prompt))) swapPool.push(t);
   }
+}
+
+// ---- Mode 5 compares which elements are hidden, not how many ----
+// A page that ships an aria-hidden widget can be "fixed" by revealing
+// the widget and hiding main instead: the hide count stays level, so
+// only the element-wise comparison catches it. Pool covers the public
+// and hidden splits across the seeds generated above.
+assert.ok(swapPool.length >= 4, `only ${swapPool.length} pages ship hidden elements`);
+for (const task of swapPool) {
+  const swapped = inStyles(task.expected, (b) => `${b}\nmain{opacity:0}`);
+  const r = await benchmark.score(task, { answer: swapped });
+  assert.equal(r.score, 0, `${task.id} hide-swap scored ${r.score}: ${r.reason}`);
+  assert.equal(r.details.hideAbuse, true, `${task.id} hide-swap not flagged as hideAbuse`);
 }
 
 // ---- Hard tier is structurally different ----
