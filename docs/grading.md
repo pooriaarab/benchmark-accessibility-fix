@@ -19,9 +19,9 @@ criterion by number only:
 | `low-contrast` | 1.4.3 | Every rendered text element reaches 4.5:1, or 3:1 for large text (>= 24px, or >= 18.66px bold), after cascade and inheritance. |
 | `heading-order` | 1.3.1 | First heading is `h1`, exactly one `h1`, no skipped levels going up. `role="heading"` with `aria-level` counts. |
 | `tabindex-positive` | 2.4.3 | No `tabindex` greater than zero; no negative `tabindex` on a natively focusable element (it drops the control from the tab order). |
-| `div-button` | 4.1.2 | No `div` or `span` that acts like a control: mouse/keyboard handlers, an interactive role without keyboard support, or a button-styled dead element. A `role="button"` with a keyboard handler passes. |
+| `div-button` | 4.1.2 | No `div` or `span` that acts like a control: mouse/keyboard handlers, an interactive role without keyboard support, or a button-styled dead element. A `role="button"` with a keyboard handler passes only with a `tabindex` of 0 or more, so the element can take keyboard focus. |
 | `missing-lang` | 3.1.1 | The `html` element carries a non-empty `lang`. |
-| `no-focus-style` | 2.4.7 | A `:focus`/`:focus-visible` rule draws a visible indicator: outline, border, shadow, background, or text decoration that is not `none`/`0`. |
+| `no-focus-style` | 2.4.7 | A `:focus`/`:focus-visible`/`:focus-within` rule draws a visible indicator: outline, border, shadow, background, or text decoration that is not `none`/`0`/`transparent` and not the same color as the backdrop. The rule's selector (state pseudos stripped) must match a rendered focusable element; a rule that matches nothing, or only paints invisible colors, does not count. |
 | `empty-link` | 2.4.4 | Every `a` has text, a non-empty `aria-label`, or an image with `alt`. |
 | `table-headers` | 1.3.1 | Every `table` contains at least one `th` or a cell with `role="columnheader"`/`"rowheader"`. |
 
