@@ -249,6 +249,25 @@ const packFiles = JSON.parse(pack.stdout)[0].files.map((f) => f.path);
 assert.ok(packFiles.includes("scripts/gen-tasks.mjs"), "npm pack drops scripts/gen-tasks.mjs");
 assert.ok(packFiles.includes("data/tasks.jsonl"), "npm pack drops data/tasks.jsonl");
 
+// ---- Report breakdown ----
+// The run report carries grading details and per-tier totals on every
+// surface that prints a report.
+assert.ok(report.rows.every((r) => r.details && typeof r.details.defectsFixed === "number"), "run rows lack details");
+assert.ok(report.rows.every((r) => typeof r.details.tier === "string"), "run rows lack tier");
+assert.deepEqual(Object.keys(report.tiers).sort(), ["easy", "hard"]);
+assert.equal(report.tiers.easy.tasks + report.tiers.hard.tasks, taskCount);
+assert.equal(report.tiers.easy.solved + report.tiers.hard.solved, report.totals.passed);
+assert.ok(typeof report.totals.defectsFixed === "number" && typeof report.totals.regressions === "number");
+const cliText = await execFile(process.execPath, ["dist/cli.js", "run", "--model", "offline", "--provider", "mock"], { maxBuffer: 10_000_000 });
+assert.match(cliText.stdout, /## By tier/);
+assert.match(cliText.stdout, /\| easy \| \d+\/\d+ \| [\d.]+% \| \d+\/\d+ \| \d+ \| \d+ \|/);
+// The SDK run() returns the same enriched shape.
+const sdkReport = await runSdk(mockAdapter({ seed: 2 }));
+assert.ok(sdkReport.tiers?.easy && sdkReport.rows.every((r) => r.details), "SDK run lacks breakdown");
+await writeFile("artifacts/run.json", cli.stdout);
+const rescored = JSON.parse((await execFile(process.execPath, ["dist/cli.js", "score", "artifacts/run.json", "--json"], { maxBuffer: 10_000_000 })).stdout);
+assert.ok(rescored.tiers?.hard && rescored.rows.every((r) => r.details), "score output lacks breakdown");
+
 const probe = createNetServer();
 await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
 const address = probe.address(); assert.ok(address && typeof address === "object");
@@ -295,6 +314,9 @@ try {
     const result = await client.callTool({ name, arguments: args });
     if (name === "run_benchmark") assert.equal(result.isError, true); else assert.notEqual(result.isError, true);
   }
+  const scored = await client.callTool({ name: "score_answer", arguments: { taskId: firstId, submission: report.rows[0].submission } });
+  const scoredJson = JSON.parse(scored.content[0].text);
+  assert.ok(typeof scoredJson.details?.defectsFixed === "number" && typeof scoredJson.details?.tier === "string", "MCP score_answer lacks details");
 } finally { await client.close(); }
 
 // The MCP surface follows A11Y_TASKS for an operator-picked split.
