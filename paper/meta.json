@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "title": "Accessibility Fix: Measuring HTML Repair Without Content Loss",
+  "authors": [
+    {
+      "name": "Pooria Arab",
+      "affiliation": "Independent researcher",
+      "orcid": "https://orcid.org/0009-0005-9964-6841"
+    }
+  ],
+  "license": "CC-BY-4.0",
+  "keywords": [
+    "accessibility",
+    "HTML repair",
+    "benchmark",
+    "static analysis",
+    "simulated agents"
+  ],
+  "code_url": "https://github.com/pooriaarab/benchmark-accessibility-fix",
+  "artifact_name": "accessibility-fix-paper.pdf",
+  "abstract": "Accessibility Fix measures whether an HTML repair corrects injected defects while retaining page content. We study 40 public synthetic pages using scripted controls and a simulated population sweep. The reference pages receive full credit on every task; unchanged pages, empty answers, and refusals receive none. A template fixer earns mean 0.788 [0.713, 0.869] with a stratified bootstrap interval. The grader rejects reference pages modified with display:none, but accepts the same references modified with clip-path concealment. A simulated gate ablation measures the credit retained when the automatic-zero gate is removed. These experiments characterize a static repair score, not complete accessibility, user benefit, or learned-model ability. No learned model or human study is included."
+}

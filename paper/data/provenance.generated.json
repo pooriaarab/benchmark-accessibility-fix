@@ -1,0 +1,40 @@
+{
+  "title": "Accessibility Fix: Measuring HTML Repair Without Content Loss",
+  "authors": [
+    {
+      "name": "Pooria Arab",
+      "affiliation": "Independent researcher",
+      "orcid": "https://orcid.org/0009-0005-9964-6841"
+    }
+  ],
+  "license": "CC-BY-4.0",
+  "keywords": [
+    "accessibility",
+    "HTML repair",
+    "benchmark",
+    "static analysis",
+    "simulated agents"
+  ],
+  "code_url": "https://github.com/pooriaarab/benchmark-accessibility-fix",
+  "artifact_name": "accessibility-fix-paper.pdf",
+  "source_commit": "40c7e9acc30656a14ac61b880feb3f57a3da6716",
+  "plan_commit": "44da047964b4f9c46901261f0e30fed53e622c9c",
+  "node": "v22.23.4",
+  "platform": "darwin",
+  "hashes": {
+    "data/tasks.jsonl": "20d9f94a23dfa0d137e1235d84e3981b358ec54b0dd9d48ad4bba052cd207cc8",
+    "src/benchmark.ts": "99270a3934b9c9cae46f4ac9c6a286d8e0c99b5c5fb99751b4f11e97bf3b00bb",
+    "src/a11y.ts": "1140bf8bb497ce21bb7df8cba01c6697ed024f443915ce57764c2a8aeaadb9a0",
+    "src/a11y-dom.ts": "f3b5b53e9b63988357e4e9f92ec8dd2c3897406558f9b19075a7adf4ac394f02",
+    "package-lock.json": "2dd52a399c66e6313134291fed6b26e13366a27a5afef53c8b2a4602e5330aaa",
+    "paper/PREREG.md": "f7be5d3a2891e39b756db7a1587199a19d5601a6998353b67d26e6ddc7b776ee",
+    "paper/scripts/run.mjs": "420358c2e64dc1da8da87fe2c98e2c865be127fa4cf5ae9191d6eeb69dc7b425",
+    "paper/scripts/fixer.mjs": "e1b665915503670f31a50b5fc40080137329dd0583ad3ee1c51d3c4e4938b8e5",
+    "paper/scripts/render.mjs": "a11b04a7e53e92dd98a9304c575986eaa1826916875debc9c4fc51c396008f88",
+    "paper/scripts/verify.mjs": "b317889259071040f0b14c946cd046d20711df197f0be74829ab687c787c44b7",
+    "paper/template/stats.mjs": "05f32655ef8503e62e4f5aa54caacdd7a4f6f3be4920871170de57142da8256f",
+    "paper/template/layout.tex": "8f19d1c9a8c2d83b1736d0e6e0bb5b0957fd00117c356945ea78ddbafac13b53",
+    "paper/template/build.py": "c4fbe230d6d0c1e008f93471db2273dfce1fa571b33915c23c5c1df3b7a52342",
+    "paper/template/reproduce.sh": "ec6ef748d8c14e630525a5991a47fe8111896028b760d3dd39e6ae1a85baed77"
+  }
+}

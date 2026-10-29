@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "pages": 9,
+  "tasks": 40,
+  "scriptedConditions": 8,
+  "scriptedExecutions": 640,
+  "simulatedConditions": 5,
+  "simulatedAgentsPerCondition": 100,
+  "semanticRepeats": true,
+  "publicRescoring": true,
+  "sourceAndPlanVerified": true,
+  "pdfSha256": "dfeb2e0d6bcd2f4d6279b8a61151b5fde9eded2e47c6aff84b609f88f99b6f66"
+}

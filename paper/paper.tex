@@ -1,0 +1,169 @@
+\documentclass{article}
+\input{template/layout.tex}
+\input{generated/macros.tex}
+\title{\PaperTitle}
+\author{Pooria Arab\\Independent researcher\\\url{\AuthorOrcid}}
+\begin{document}
+\maketitle
+\begin{abstract}\AbstractText\end{abstract}
+
+\section{Why accessibility repair needs its own measurement}
+An HTML repair can remove an error message while leaving a person unable to use the page. Removing an image removes its missing alternative text. Hiding a form removes its visible contrast problem. Neither action supplies the information or interaction that the page originally promised. A useful repair benchmark must therefore measure both correction and preservation.
+
+Accessibility Fix studies this joint requirement in a bounded setting: a single submitted HTML document with injected defects. The intended construct is the ability to repair supported accessibility defects while retaining the original page's content and controls. The observable score combines corrected defect classes, new failures, and explicit preservation checks. It does not measure whether a person with a disability can finish a task. That broader claim requires evidence absent from static HTML analysis.
+
+This distinction matters when a coding assistant receives a request such as ``make this page accessible.'' The request leaves many implementation choices open. An assistant can add a label, replace a custom control, rewrite the layout, or remove a troublesome region. A check of the final page alone cannot tell whether an apparent improvement came from useful repair or from deleting the work. Comparing the original and repaired documents gives the evaluator evidence about those choices.
+
+The contribution examined here is a repair measurement design with controls for inaction, structural shortcuts, and loss of content. The empirical contribution is an offline characterization of that design. We run scripted policies through the actual evaluation path and expose a specific limit in its concealment checks. We also introduce a simulated population sweep that separates assumed repair ability from a tendency to hide repaired content. Neither contribution establishes the ability of any learned model.
+
+The study asks whether the score separates known repairs from unchanged inputs, whether a simple template fixer transfers between page structures, and whether preservation gates change credit. These questions concern the measurement instrument. They can be answered without buying model inference or presenting scripted behavior as autonomous intelligence.
+
+
+\section{Related work and scope}
+SWE-bench evaluates changes that resolve software issues in existing projects \citep{swebench}. Accessibility Fix instead isolates changes to a document with known injected defects. This narrower setting sacrifices project realism but makes the relation between a particular change and a particular score easier to inspect. A successful result here cannot substitute for evidence that a model can locate, build, and repair an unfamiliar application.
+
+WebArena evaluates functional task completion in interactive web environments \citep{webarena}. Its focus makes browser state and long action sequences central to evaluation. The present benchmark evaluates an output document and does not execute a browser session. The two approaches could complement each other: a document repair score could select cases for later task-based evaluation. This study does not perform that integration or compare numerical scores across the benchmarks.
+
+WCAG provides technology-independent criteria for accessible content \citep{wcag}. The present analyzer uses selected criteria as motivation for concrete checks. A criterion citation does not establish that the implemented check fully tests that criterion. For example, requiring non-empty alternative text does not assess whether that text communicates the image's purpose. Requiring a table header does not establish that every cell has the correct header association.
+
+W3C guidance distinguishes automated evaluation support from complete accessibility evaluation \citep{tools}. We follow that distinction when interpreting the results. A passing document is a passing document under this analyzer, not a conformance certificate. This is especially important when presenting the reference policy: its success verifies compatibility between fixture generation and scoring, rather than independent expert approval of the generated pages.
+
+BetterBench treats benchmark quality as a concern across design, implementation, documentation, and maintenance \citep{betterbench}. Our controls address only part of that concern. They make score behavior inspectable and reproducible. They do not supply independent annotation, representative sampling, or user validation. We retain these gaps rather than converting an engineering check into a claim of broad validity.
+
+The presentation follows the construct-first organization of PayBench \citep{paybench}. Its paired safe and unsafe decisions motivate a useful question: does a safeguard preserve legitimate completion? Here the matched objects are repaired documents and controlled mutations of those documents. They are not a payment task, a conversational trap, or a separately authored safe-lookalike dataset.
+
+
+\section{Experiment design}
+\subsection{Unit of evaluation and task construction}
+A task contains an instruction, a broken HTML page, metadata describing the injected defect classes, and a reference repair. The agent returns the complete repaired document. The grader extracts HTML from the answer, including a fenced HTML block when present, and compares it with the broken page. The reference repair is available to our scripted positive control. It would not be an admissible input to a model being tested for repair ability.
+
+The public corpus contains \TaskCount{} tasks: \EasyCount{} in the easy tier and \HardCount{} in the hard tier. The tiers differ in structure as well as defect burden. Easy pages use a simple article layout. Hard pages include grouped fields, naming chains, widgets, and more complex relationships among controls. A tier gap therefore combines several changes. It cannot identify the causal effect of adding a single defect.
+
+The generator selects synthetic content and injects defects into page templates. It validates reference repairs with the same grading implementation used in the experiment. This establishes an attainable score ceiling by construction. It also creates dependence between task construction and the evaluator. A shared assumption can make both the generator and the grader wrong in the same way.
+
+We use the complete public corpus at a frozen source revision. We do not select cases after observing policy scores. The existing family paper describes the same repair construct and a template-fixer guard, but its historical numerical summary is not reused here. Our figures and tables come from the current frozen tasks and fresh executions. Public exposure means that these tasks are not a clean holdout for future learned models.
+
+\subsection{Scripted controls}
+The reference policy returns the supplied reference document. Empty returns no text. Constant returns an unsupported claim that the page is accessible. Unchanged returns the original broken HTML. Refusal returns a short refusal without a repaired page. These controls distinguish output format, asserted success, inaction, and an attainable repair.
+
+The template fixer applies the existing fixed sequence of substitutions intended for the easy layout. It adds missing attributes, adjusts common heading patterns, replaces simple clickable containers, and inserts styling. It is intentionally limited by the patterns it recognizes. It is not trained during this experiment, and it does not consult reference answers. Its purpose is to test whether a superficial structural policy reaches the same score across tiers.
+
+The hidden-reference control inserts \texttt{display:none} on the reference document's main region. The clipped-reference control instead inserts \texttt{clip-path:inset(100\%)} on that region. Both start from an answer that otherwise passes the grader. Matching the underlying document isolates the analyzer's response to each concealment expression. These interventions test different CSS mechanisms; they do not form an exhaustive set of equivalent browser behaviors.
+
+Every scripted condition runs twice with fixed options. The experiment records full reports and answer text. Semantic hashes omit timing fields and retain task identity, answers, scores, reasons, and grading details. A repeated run checks determinism under identical input. It does not supply another independent page sample or strengthen a confidence interval by doubling the denominator.
+
+\subsection{Plan, exclusions, and resources}
+A committed plan precedes the data files. It names the hypotheses, controls, simulated sweep, outcome measures, and stopping rule. This is a local record of analysis order, not an independently timestamped registration. No external registration or publication is part of this work.
+
+All public tasks remain in the analysis. Empty answers and refusals are outcomes rather than missing observations. Infrastructure errors abort collection instead of silently dropping a task. The plan also checks task order, mutation application, repeated semantic outcomes, and reported cost. No learned inference is configured or probed. We cannot infer whether a free provider would have been available elsewhere.
+
+
+\section{Coverage and its boundaries}
+The corpus covers \CheckCount{} named defect families. Figure~\ref{fig:coverage} shows their actual distribution. An item may contain several injected defects, so adding bar heights does not yield the number of pages. Counts describe this corpus exactly. They do not estimate the prevalence of accessibility defects on the web.
+
+\input{figures/coverage.tex}
+\paragraph{Names and text alternatives.} Image checks require non-empty alternative text. Form and link checks resolve several naming mechanisms, including references to other elements. A dangling naming reference can fail even when another source of text exists. These checks detect missing structure but do not establish semantic quality. The word ``photo'' can satisfy a non-empty requirement without providing a useful description.
+\paragraph{Visual presentation.} Contrast analysis resolves a bounded set of CSS declarations, inheritance, and color representations. Focus checks search for a visible indicator attached to an element that can receive focus. The evaluator has no general layout engine. Background images, complex painting order, responsive behavior, and actual visibility during an interaction therefore require other evidence.
+\paragraph{Navigation and structure.} Heading checks enforce a consistent heading progression. Tab-order checks reject selected patterns that remove native controls from ordinary keyboard navigation or cancel navigation keys. Control checks look for keyboard support on custom interactive elements and selected invalid nesting. Table checks require header structure. These are useful indicators, but none alone demonstrates a coherent interaction for an assistive technology user.
+\paragraph{Language.} A language check requires a non-empty language attribute on the document element. It does not establish that the declared language matches all visible text. A repair that supplies a syntactically present but incorrect language can therefore satisfy this local rule while failing the intended reading experience.
+The coverage should be read as a map of tested patterns. It omits whole classes of access needs, including multimedia alternatives and many cognitive usability concerns. Even within a covered family, the analyzer evaluates a restricted representation. Expanding the task count without expanding that representation would improve sampling within the generator while leaving these construct gaps unchanged.
+
+
+\section{Taxonomy of repair failures}
+\paragraph{No repair.} An unchanged answer preserves all original content but leaves injected defects unresolved. A refusal or a confident statement can avoid syntactic mistakes while supplying no repaired page. These outcomes belong at the floor when the task requires a document. They should remain visible in reports rather than being removed as malformed samples.
+\paragraph{Partial repair.} A policy may correct some injected classes and miss others. Partial credit distinguishes this behavior from total failure. It also creates an interpretive risk: a high average can coexist with a remaining defect that blocks the page's main action. The benchmark does not weight defects by harm, and the paper does not interpret its average as a fraction of user needs met.
+\paragraph{Regression.} A change can repair one class while causing a previously passing class to fail. Regressions are measured relative to the original page. This comparison is narrower than checking whether every final condition passes, because an original failure outside the injected set has a different role in the formula. Reports retain the regression count so that aggregate improvement does not hide new errors.
+\paragraph{Removal.} Deleting text or reducing counts of protected element types triggers preservation checks. A lower error count caused by deleting a field is not accepted as repair. Count preservation remains a proxy: replacing a meaningful element with another element of the same type can preserve counts without preserving its function. Text preservation similarly does not prove that relationships or actions survive.
+\paragraph{Concealment.} Selected hiding signals cause an automatic zero when they hide content that was previously visible. Comparing element identity, rather than only the total number of hidden elements, prevents a simple swap of hidden regions from escaping the check. The clipped-reference experiment shows that this protection is limited to recognized signals.
+\paragraph{Silencing.} Some edits suppress the appearance of a defect without supplying its missing function. Examples include an empty name or a focus rule that removes an indicator. The grader treats selected silencing gestures as automatic-zero causes when the injected defect still fails. This rule makes the intent of the score explicit, but its recognized gestures are not a complete semantic model of repair.
+\paragraph{Representation mismatch.} An answer can be correct in a browser but unsupported by the static analyzer, or pass static checks while failing during interaction. This is a distinct class from agent failure. A mature evaluation should preserve such cases for adjudication. Our controls identify one known blind spot, but they do not estimate the frequency of either direction of mismatch.
+
+\section{Metrics and scoring}
+Let $D_i$ be the number of injected defect classes for task $i$, $F_i$ the number corrected, and $R_i$ the number of regressions. Let $A_i$ indicate whether any preservation or silencing rule forces zero credit. The implementation's score is
+
+\begin{equation}
+ S_i=(1-A_i)\,\min\{1,\max\{0,(F_i-\tfrac12 R_i)/\max(1,D_i)\}\}.
+\end{equation}
+The regression coefficient is a design choice rather than a measured harm ratio. It gives partial repairs a penalty for damaging previously passing checks. Automatic-zero conditions take priority over this arithmetic. They include substantial text loss, protected element removal, newly hidden content, complete style deletion, and selected silencing behavior. The current text rule requires retention of at least nine tenths of the original word multiset.
+
+The primary outcome is the arithmetic mean of $S_i$ over the frozen task set. Full credit is a secondary binary outcome defined by $S_i=1$. Automatic-zero frequency reports a different failure mechanism and is retained in the data. These measures should not be conflated. A policy can have a reasonable mean through partial repair while rarely producing a fully passing page.
+
+For binary outcomes we report \CILevel{}\% Wilson intervals. For mean scores we use \DrawCount{} percentile bootstrap resamples, preserving the observed easy and hard strata. The bootstrap samples tasks within each stratum and then computes the overall task mean. This keeps the corpus's tier weighting fixed rather than letting resampling change the benchmark definition.
+
+These intervals require an interpretation beyond the finite corpus. The reported mean is exact for the observed documents and deterministic policies. The interval describes a hypothetical sampling process within the observed task families. It does not account for unrepresented page structures, shared generator bias, or errors in the scoring rules. With only a small set of templates, ordinary task resampling can overstate the diversity of the underlying evidence.
+
+Boundary bootstrap intervals collapse when every score is identical. A degenerate interval does not prove that a policy succeeds on all future pages. We therefore show Wilson intervals for full credit alongside mean-score intervals. The Wilson denominator is the number of distinct tasks, not the number of repeated executions. Simulated population intervals use a different unit, described below.
+
+
+\section{Results from the public corpus}
+\begin{table}[ht]\centering\small\input{generated/controls.tex}
+\caption{Scripted controls on the same \TaskCount{} tasks. Brackets show \CILevel{}\% intervals. Means use stratified bootstrap intervals; full-credit frequencies use Wilson intervals.}\label{tab:controls}\end{table}
+The reference policy reaches the attainable ceiling. Its full-credit frequency is \ReferenceFull{}. Empty, constant, unchanged, and refusal controls receive no credit; their full-credit frequency is \ZeroFull{}. This supports the planned separation between a known repair and the floor controls. It does not measure an agent's ability to discover the repair, since the reference control reads the answer supplied with the task.
+
+\input{figures/controls.tex}
+The template fixer earns overall mean \FixerMean{}. Its easy-tier mean is \FixerEasy{}, compared with \FixerHard{} on the hard tier. The tier contrast is consistent with sensitivity to unfamiliar structure. However, structure and defect burden change together, so this result does not isolate which change causes the drop. It also does not justify using either tier as a calibrated measure of general model difficulty.
+
+The hidden-reference policy receives no credit. The clipped-reference policy receives the same full-credit frequency as the reference, \ReferenceFull{}. This is a positive observation of a known blind spot, not a missing log entry. The changed answer appears in the recorded submission and receives the measured score. No browser run is needed to establish that the static grader fails to penalize this expression; a browser run would be needed to measure its practical effect in a specific rendering context.
+
+The contrast between hiding expressions bounds the main claim. The grader prevents some shortcuts that suppress content. It does not guarantee preserved visible information. Treating every passing answer as an accessible page would exceed the evidence. Conversely, treating the clipped control as proof that all preservation checks are useless would ignore the matched display-hiding result.
+
+Across \ConditionCount{} conditions and their repeats, the study records \ExecutionCount{} task executions. All repeated semantic hashes agree. This supports reproducibility of the measured score behavior on the frozen inputs. It does not establish agreement with another implementation, another runtime surface, or an independent accessibility judgment.
+
+
+\section{Extra virtual experiment: simulated population and gate ablation}
+\subsection{Simulated policies and counterfactual scores}
+The additional experiment constructs a simulated population with fixed repair probability and a variable tendency to hide repaired output. Every simulated agent faces the same public tasks. For each task, a deterministic pseudorandom draw selects a repaired reference or an unchanged page. An independent draw may then replace the repaired reference with its display-hidden version. Draws are shared across conditions, so changing the hiding parameter preserves the simulated agent's underlying repair decisions.
+
+The experiment contains \AgentCount{} simulated agents in each of \SweepCount{} simulated conditions. The repair probability is fixed at three quarters. The hiding parameter spans the full range shown in Figure~\ref{fig:simulation}. Scores are read from the already measured public-run outcomes for the selected documents. There is no learned agent, new inference call, or claim that these probabilities describe actual developer behavior.
+
+For the simulated ablation, we reconstruct the bounded defect-and-regression score without the automatic-zero gate. We use each measured row's defect counts and regression count. This is a counterfactual scoring rule, not a deployment that disables safeguards in a live system. It removes the automatic-zero layer as a whole; it does not isolate the text, style, or hiding rule independently.
+
+Hidden pages can lose raw credit even after removing the gate. Some checks require an examined target, and hiding content can remove those targets. Thus the ablated curve need not be flat. This remaining response is useful evidence that scoring protections are distributed across the rule set. Calling the ablation ``all preservation removed'' would be inaccurate.
+
+\input{figures/simulation.tex}
+\begin{table}[ht]\centering\small\input{generated/simulation.tex}
+\caption{Simulated population means with \CILevel{}\% agent-bootstrap intervals. Each simulated agent retains all task outcomes within a resample.}\label{tab:sim}\end{table}
+\subsection{Simulated outcomes and uncertainty}
+With no simulated hiding, the full and ablated scores coincide at \SimStart{}. This planned null is expected because the selected successful answers are unchanged references and the remaining answers are unchanged broken pages. It verifies that the simulated ablation does not invent an effect where the automatic-zero layer is inactive.
+
+At the maximum simulated hiding setting, the full-grader mean is \SimEnd{}, while the simulated gate-disabled mean is \AblatedEnd{}. The paired simulated difference, full minus gate-disabled, is \SimDifference{}. This difference concerns the same simulated agents and task choices. It is not a comparison between independent models or a statistical estimate of real-world safeguard effectiveness.
+
+Bootstrap resampling operates on complete simulated agent vectors. It therefore preserves dependence among an agent's repeated task results and among the two scoring conditions. The intervals describe variation induced by the stated simulation mechanism over this fixed corpus. They exclude uncertainty about the mechanism itself. A different repair probability, a different population model, or another concealment strategy could yield a different curve.
+
+The simulated study answers a measurement question: how much apparent repair credit survives when a particular gate is removed? It cannot answer how often a real agent hides content or whether a warning would change that behavior. Such behavioral claims require model executions or participant data. Keeping those questions separate makes the virtual experiment useful without presenting simulation as empirical agent performance.
+
+
+\section{Roadmap for stronger validation}
+The next priority is an independent assessment of repair quality. Accessibility specialists should review both reference pages and adversarial repairs without seeing their scores. Disagreements should be retained with reasons and resolved through a published procedure. This would test whether the grader's positive labels correspond to useful repairs, rather than merely matching its generator.
+
+Browser-based evaluation should then exercise keyboard navigation, focus visibility, and the accessible representation of each repaired page. A trace should show the actual user action and the resulting state. Merely loading the page successfully would not validate the intended behavior. A successful positive case should establish that the measurement can observe an interaction before absence is interpreted as failure.
+
+Task diversity should expand through independent layout families. New random content within the same templates is useful for repeatability but does not establish transfer to unfamiliar applications. A future held-out evaluation should separate structural families, keep test examples private until use, and document the release policy. Any public corpus used for development should remain labeled as such.
+
+The scoring design also needs explicit treatment of legitimate hiding. Some content is intentionally available to assistive technology but visually hidden. Rejecting every CSS concealment pattern would erase that distinction and could punish valid repairs. A future rule should use the element's purpose, preserved relationships, and actual interaction requirements. The clipped-reference result motivates that work but does not determine the correct replacement rule.
+
+Finally, learned-model evaluation should use a fixed access policy, prompts, output limits, and retry rules. It should report failures alongside successes and preserve outputs for re-scoring. Free hosted access may support such a study, but availability and publication terms need verification at the time of collection. This packet makes no provider ranking and has no unfinished learned-model result hidden in its tables.
+
+
+\section{Caveats and intended use}
+\paragraph{Static scope.} The analyzer implements a restricted HTML and CSS interpretation. It does not run JavaScript, calculate general browser layout, test zoom, or use assistive technology. Passing checks therefore supports only the static construct described here. Dynamic interfaces and responsive states remain outside the measured task.
+\paragraph{Synthetic dependence.} Tasks and reference answers share their generator and validation rules. The observed ceiling is partly guaranteed by construction. The small number of template families limits generalization even when individual pages differ in words, colors, or injected classes. Confidence intervals cannot correct a sampling frame that omits the intended deployment domain.
+\paragraph{Preservation proxies.} Word recall and element counts can reject destructive shortcuts but cannot establish preserved meaning or behavior. A policy may retain words while changing their order or associations. It may preserve a control count while changing an action. Conversely, an effective repair can sometimes legitimately restructure the page in ways that challenge these proxies.
+\paragraph{Known blind spot.} The clipped-reference control earns full credit under the frozen evaluator. We disclose that outcome without changing the grader during the experiment. A future fix should have its own validation and should preserve the old results as a versioned observation. Re-running a changed grader cannot retroactively turn this limitation into a successful original test.
+\paragraph{No human or learned-model evidence.} No participant study measures time, error, satisfaction, or access. No learned model produces the evaluated repairs. The scripted controls validate score behavior and the simulated sweep explores assumptions. Neither can justify deployment decisions about an autonomous assistant.
+\paragraph{Reproducibility and evidence boundaries.} Raw answers and repeated reports support re-scoring. The study does not compare all available interface surfaces or assess agreement with an external tool. Its plan is committed before results but not externally registered. These limits should remain attached to any later reuse of the headline numbers.
+The intended use is instrument development and controlled evaluation of HTML repair under stated rules. The benchmark can expose a policy that leaves defects untouched or obtains credit through a recognized shortcut. It should not be used alone to certify compliance, rank accessibility for whole products, or replace evaluation with affected users.
+
+
+\section{Citation and availability}
+The paper text and generated figures are released under CC-BY-4.0. The benchmark code and tasks retain their existing MIT license. Cite this work by its title, author, and source revision until a separate publication record exists. No new archival deposit or venue submission accompanies these results.
+
+Code, data, and repeat instructions: \url{https://github.com/pooriaarab/benchmark-accessibility-fix}. The packet records the frozen benchmark revision and the study-plan commit. Generated tables and figures derive from the stored execution reports and simulated population records.
+
+
+\section{Authors}
+Pooria Arab is an independent researcher. AI assistance supports analysis scripts, drafting, and document preparation. The experiments remain scripted controls and explicitly labeled simulations. The author is responsible for reviewing the claims, limitations, and released evidence.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+\end{document}
