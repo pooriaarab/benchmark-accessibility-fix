@@ -1,0 +1,7 @@
+\begin{figure}[ht]\centering
+\begin{tikzpicture}\begin{axis}[ymin=0,ymax=1,xlabel={Simulated probability of hiding a repaired page},ylabel={Simulated mean score},legend style={at={(.5,1.03)},anchor=south,legend columns=2}]
+\addplot[color=okblue,mark=*,error bars/.cd,y dir=both,y explicit] table[x=q,y=guarded,y error minus=glo,y error plus=ghi,col sep=comma]{data/simulation.generated.csv};
+\addplot[color=okorange,mark=square*,dashed,error bars/.cd,y dir=both,y explicit] table[x=q,y=ablated,y error minus=alo,y error plus=ahi,col sep=comma]{data/simulation.generated.csv};\legend{Full grader,Simulated gate removal}
+\end{axis}\end{tikzpicture}
+\caption{Simulated removal of preservation gates retains credit for hidden pages. Each simulated condition contains \AgentCount{} simulated agents evaluated on \TaskCount{} fixed pages. Intervals resample agents, preserving their complete task vectors. This simulated ablation does not measure a deployed control.}\label{fig:simulation}
+\end{figure}

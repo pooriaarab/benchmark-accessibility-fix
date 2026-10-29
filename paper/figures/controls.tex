@@ -1,0 +1,6 @@
+\begin{figure}[ht]\centering
+\begin{tikzpicture}\begin{axis}[ybar,ymin=0,ymax=1.1,ylabel={Mean repair score},xtick={0,...,7},xticklabels={Reference,Empty,Constant,Unchanged,Refusal,Fixer,Hidden,Clipped},x tick label style={rotate=30,anchor=east}]
+\addplot[fill=okblue,error bars/.cd,y dir=both,y explicit] table[x=x,y=mean,y error minus=low,y error plus=high,col sep=comma]{data/controls.generated.csv};
+\end{axis}\end{tikzpicture}
+\caption{The grader separates repair from inaction, but misses clipped content. Each bar uses the same \TaskCount{} pages. Error bars are \CILevel{}\% percentile bootstrap intervals stratified by tier. Boundary intervals collapse; Table~\ref{tab:controls} supplies Wilson intervals for full credit.}\label{fig:controls}
+\end{figure}

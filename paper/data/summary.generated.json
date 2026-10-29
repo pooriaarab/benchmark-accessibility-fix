@@ -1,0 +1,547 @@
+{
+  "kind": "scripted-controls",
+  "tasks": 40,
+  "conditions": 8,
+  "executions": 640,
+  "ciLevel": 95,
+  "costUsd": 0,
+  "coverage": [
+    {
+      "id": "div-button",
+      "easy": 8,
+      "hard": 6
+    },
+    {
+      "id": "empty-link",
+      "easy": 7,
+      "hard": 6
+    },
+    {
+      "id": "heading-order",
+      "easy": 9,
+      "hard": 4
+    },
+    {
+      "id": "low-contrast",
+      "easy": 8,
+      "hard": 7
+    },
+    {
+      "id": "missing-alt",
+      "easy": 8,
+      "hard": 8
+    },
+    {
+      "id": "missing-lang",
+      "easy": 9,
+      "hard": 5
+    },
+    {
+      "id": "no-focus-style",
+      "easy": 4,
+      "hard": 4
+    },
+    {
+      "id": "tabindex-positive",
+      "easy": 6,
+      "hard": 4
+    },
+    {
+      "id": "table-headers",
+      "easy": 9,
+      "hard": 5
+    },
+    {
+      "id": "unlabeled-input",
+      "easy": 7,
+      "hard": 5
+    }
+  ],
+  "stats": [
+    {
+      "policy": "reference",
+      "mean": {
+        "value": 1,
+        "low": 1,
+        "high": 1,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 1,
+            "low": 1,
+            "high": 1,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 1,
+            "low": 0.8754449702581328,
+            "high": 0.9999999999999998,
+            "k": 27,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 1,
+            "low": 1,
+            "high": 1,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 1,
+            "low": 0.7719046276458016,
+            "high": 0.9999999999999999,
+            "k": 13,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "empty",
+      "mean": {
+        "value": 0,
+        "low": 0,
+        "high": 0,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.12455502974186705,
+            "k": 0,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.22809537235419838,
+            "k": 0,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "constant",
+      "mean": {
+        "value": 0,
+        "low": 0,
+        "high": 0,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.12455502974186705,
+            "k": 0,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.22809537235419838,
+            "k": 0,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "echo",
+      "mean": {
+        "value": 0,
+        "low": 0,
+        "high": 0,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 0.35,
+        "low": 0.2213452887317629,
+        "high": 0.5049411916274231,
+        "k": 14,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.12455502974186705,
+            "k": 0,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.22809537235419838,
+            "k": 0,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "refusal",
+      "mean": {
+        "value": 0,
+        "low": 0,
+        "high": 0,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.12455502974186705,
+            "k": 0,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.22809537235419838,
+            "k": 0,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "fixer",
+      "mean": {
+        "value": 0.7875,
+        "low": 0.7125,
+        "high": 0.86875,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0.75,
+        "low": 0.5980603857923197,
+        "high": 0.858128813609037,
+        "k": 30,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 0.2,
+        "low": 0.10499989725437704,
+        "high": 0.347573063463995,
+        "k": 8,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 1,
+            "low": 1,
+            "high": 1,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 1,
+            "low": 0.8754449702581328,
+            "high": 0.9999999999999998,
+            "k": 27,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0.34615384615384615,
+            "low": 0.1346153846153846,
+            "high": 0.5961538461538461,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0.23076923076923078,
+            "low": 0.08179528718498569,
+            "high": 0.5025637594672749,
+            "k": 3,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "hidden",
+      "mean": {
+        "value": 0,
+        "low": 0,
+        "high": 0,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.12455502974186705,
+            "k": 0,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 0,
+            "low": 0,
+            "high": 0,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 0,
+            "low": 0,
+            "high": 0.22809537235419838,
+            "k": 0,
+            "n": 13
+          }
+        }
+      }
+    },
+    {
+      "policy": "clipped",
+      "mean": {
+        "value": 1,
+        "low": 1,
+        "high": 1,
+        "draws": 2000,
+        "seed": 20261029
+      },
+      "full": {
+        "value": 1,
+        "low": 0.9123783988027135,
+        "high": 1,
+        "k": 40,
+        "n": 40
+      },
+      "autoZero": {
+        "value": 0,
+        "low": 0,
+        "high": 0.08762160119728664,
+        "k": 0,
+        "n": 40
+      },
+      "tiers": {
+        "easy": {
+          "n": 27,
+          "mean": {
+            "value": 1,
+            "low": 1,
+            "high": 1,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 1,
+            "low": 0.8754449702581328,
+            "high": 0.9999999999999998,
+            "k": 27,
+            "n": 27
+          }
+        },
+        "hard": {
+          "n": 13,
+          "mean": {
+            "value": 1,
+            "low": 1,
+            "high": 1,
+            "draws": 2000,
+            "seed": 20261029
+          },
+          "full": {
+            "value": 1,
+            "low": 0.7719046276458016,
+            "high": 0.9999999999999999,
+            "k": 13,
+            "n": 13
+          }
+        }
+      }
+    }
+  ],
+  "repeatIdentical": true,
+  "freeModels": {
+    "status": "not-run",
+    "reason": "Learned inference is not configured or probed in this study."
+  }
+}
